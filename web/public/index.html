@@ -1,0 +1,445 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>paperqueue</title>
+<meta name="theme-color" content="#242f38">
+<link rel="manifest" href="/manifest.webmanifest">
+<link rel="icon" href="/icon.svg" type="image/svg+xml">
+<link rel="apple-touch-icon" href="/icon-192.png">
+<style>
+  /* Palette lifted from the Textual dark theme the TUI renders with. */
+  :root {
+    --bg: #121212; --panel: #1c1c1c; --stripe: #272727; --bar: #242f38; --line: #2d3740;
+    --accent: #0178d4; --text: #e0e0e0; --muted: #a0a3a6; --on-accent: #ddedf9;
+    --key: #ffa62b; --faint: #495259; --danger: #e07a5f; --ok: #4caf50;
+    color-scheme: dark;
+  }
+  * { box-sizing: border-box; }
+  html { height: 100%; -webkit-text-size-adjust: 100%; }
+  body {
+    height: 100%; height: 100dvh;
+    margin: 0; background: var(--bg); color: var(--text);
+    font: 14px/1.35 ui-monospace, "Fira Code", "JetBrains Mono", "SF Mono", Menlo, Consolas, monospace;
+    display: flex; flex-direction: column; overflow: hidden;
+    padding-top: env(safe-area-inset-top);
+  }
+
+  /* ---- header / footer bars (Textual Header + Footer) ---- */
+  .bar { background: var(--bar); flex: none; }
+  #header { text-align: center; padding: 4px 8px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  #header b { font-weight: 700; color: var(--text); }
+  #header span { color: var(--muted); }
+  #footer { display: flex; flex-wrap: wrap; gap: 0 4px; padding: 4px 6px calc(4px + env(safe-area-inset-bottom)); }
+  #footer button {
+    font: inherit; background: none; border: 0; color: var(--muted); cursor: pointer;
+    padding: 3px 6px; border-radius: 3px; touch-action: manipulation; white-space: nowrap;
+  }
+  #footer button kbd { font: inherit; color: var(--key); font-weight: 700; margin-right: 5px; }
+  #footer button:hover, #footer button:focus-visible { background: var(--line); outline: none; }
+  #footer .spacer { flex: 1; }
+  #footer .palette { color: var(--faint); align-self: center; padding-right: 4px; font-size: 12px; }
+
+  /* ---- screens ---- */
+  .screen { flex: 1; min-height: 0; display: none; flex-direction: column; }
+  .screen.on { display: flex; }
+
+  /* ---- input (Textual Input) ---- */
+  #inputwrap { flex: none; margin: 8px 12px 0; }
+  #link {
+    width: 100%; font: inherit; color: var(--text); background: var(--panel);
+    border: 1px solid var(--line); border-radius: 0; padding: 6px 10px;
+  }
+  #link::placeholder { color: var(--muted); }
+  #link:focus { outline: none; border-color: var(--accent); }
+
+  /* ---- table (Textual DataTable) ---- */
+  .tablewrap { flex: 1; min-height: 0; overflow: auto; margin: 8px 12px; background: var(--panel); }
+  table { width: 100%; border-collapse: collapse; table-layout: fixed; }
+  th {
+    text-align: left; font-weight: 700; color: var(--text); background: var(--panel);
+    padding: 2px 8px; position: sticky; top: 0; z-index: 1; white-space: nowrap;
+  }
+  td { padding: 2px 8px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  tbody tr:nth-child(even) { background: var(--stripe); }
+  tbody tr { cursor: pointer; touch-action: manipulation; }
+  tbody tr.cursor, tbody tr.cursor:nth-child(even) { background: var(--accent); }
+  tbody tr.cursor td { color: var(--on-accent); font-weight: 700; }
+  .c-idx { width: 3.5em; color: var(--muted); }
+  .c-pdf { width: 4em; }
+  .c-when { width: 11.5em; }
+  .c-read { width: 11.5em; }
+  tbody tr.cursor .c-idx { color: var(--on-accent); }
+  .empty { color: var(--muted); text-align: center; padding: 32px 12px; }
+
+  /* ---- token dialog + notification (Textual toast) ---- */
+  dialog {
+    border: 1px solid var(--line); background: var(--panel); color: var(--text);
+    padding: 16px; width: calc(100% - 32px); max-width: 380px; font: inherit;
+  }
+  dialog::backdrop { background: rgba(0,0,0,.6); }
+  dialog input { width: 100%; font: inherit; padding: 6px 10px; margin: 10px 0 12px;
+                 background: var(--bg); color: var(--text); border: 1px solid var(--line); }
+  dialog button { width: 100%; font: inherit; padding: 6px; background: var(--accent); color: var(--on-accent);
+                  border: 1px solid var(--accent); cursor: pointer; }
+  dialog .hint { color: var(--muted); font-size: 12px; }
+  #toast {
+    position: fixed; right: 12px; bottom: calc(40px + env(safe-area-inset-bottom));
+    background: var(--panel); color: var(--text); border-left: 3px solid var(--accent);
+    padding: 8px 12px; max-width: min(420px, calc(100% - 24px));
+    opacity: 0; transition: opacity .15s; pointer-events: none; white-space: pre-wrap;
+  }
+  #toast.show { opacity: 1; }
+  #toast.err { border-left-color: var(--danger); }
+
+  @media (max-width: 620px) { .c-when, .c-read, .c-pdf { display: none; } }
+  #hint { display: none; }
+  @media (pointer: coarse) {
+    #link { font-size: 16px; }              /* below 16px iOS zooms the page on focus */
+    th { padding: 6px 8px; }
+    td { padding: 10px 8px; }               /* ~40px rows, comfortable to tap */
+    #footer { gap: 2px; }
+    #footer button { padding: 12px 10px; min-height: 44px; }   /* full touch target */
+    #toast { bottom: calc(96px + env(safe-area-inset-bottom)); }  /* clear of a wrapped footer */
+    /* Without a keyboard the cursor row has to be obvious: it is what the footer keys act on. */
+    tbody tr.cursor .c-idx::before { content: "\25b8 "; }
+    #hint { display: block; color: var(--muted); font-size: 12px; margin: 6px 12px 0; }
+  }
+</style>
+</head>
+<body>
+
+<div id="header" class="bar"><b>paperqueue</b>— <span id="sub">connecting…</span></div>
+
+<!-- main screen -->
+<section id="main" class="screen on">
+  <div id="inputwrap">
+    <input id="link" placeholder="Paste a paper link and press Enter" inputmode="url" enterkeyhint="done" autocomplete="off">
+    <p id="hint">Tap a paper to select it, then a key below. Tap it again to open the PDF.</p>
+  </div>
+  <div class="tablewrap">
+    <table id="stack">
+      <thead><tr><th class="c-idx">#</th><th>Title</th><th class="c-pdf">PDF</th><th class="c-when">Added</th></tr></thead>
+      <tbody></tbody>
+    </table>
+    <p id="empty" class="empty" hidden>Stack is empty. Paste a link above.</p>
+  </div>
+</section>
+
+<!-- history screen -->
+<section id="history" class="screen">
+  <div class="tablewrap">
+    <table id="hstack">
+      <thead><tr><th>Title</th><th class="c-read">Read</th></tr></thead>
+      <tbody></tbody>
+    </table>
+    <p id="hempty" class="empty" hidden>No papers read yet.</p>
+  </div>
+</section>
+
+<div id="footer" class="bar"></div>
+
+<dialog id="tokenDialog">
+  <form method="dialog" id="tokenForm">
+    <strong>Access token</strong>
+    <div class="hint">The TOKEN secret set on the Worker.</div>
+    <input id="token" type="password" autocomplete="current-password" required>
+    <button class="primary" type="submit">Save</button>
+  </form>
+</dialog>
+<div id="toast" role="status"></div>
+
+<script>
+(() => {
+  const $ = (id) => document.getElementById(id);
+  const TOKEN_KEY = "paperqueue.token";
+  let token = "";
+  let version = -1;
+  let state = { papers: [], history: [] };
+  let pollTimer = null;
+  let screen = "main";          // "main" | "history"
+  let cursor = { main: 0, history: 0 };
+  let problem = null;
+
+  try { token = localStorage.getItem(TOKEN_KEY) || ""; } catch {}
+
+  // ---- helpers ------------------------------------------------------------
+  let toastTimer;
+  function toast(msg, isError) {
+    const el = $("toast");
+    el.textContent = msg;
+    el.classList.toggle("err", !!isError);
+    el.classList.add("show");
+    clearTimeout(toastTimer);
+    toastTimer = setTimeout(() => el.classList.remove("show"), 2500);
+  }
+  function countLabel() {
+    const n = state.papers.length;
+    return n + (n === 1 ? " paper" : " papers");
+  }
+  function setSub(text) { $("sub").textContent = text; }
+  // Same format as the TUI's _fmt_added: local time, "YYYY-MM-DD HH:MM".
+  function fmt(iso) {
+    if (!iso) return "";
+    const d = new Date(iso);
+    if (isNaN(d)) return iso;
+    const p = (n) => String(n).padStart(2, "0");
+    return `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())} ${p(d.getHours())}:${p(d.getMinutes())}`;
+  }
+  function readUrl(p) { return p.pdf_url || p.url; }
+  function extractUrl(text) {
+    if (!text) return "";
+    const m = /https?:\/\/\S+/.exec(text);
+    return m ? m[0] : text.trim();
+  }
+  function rows() {
+    return screen === "main" ? [...state.papers].reverse() : [...state.history].reverse();
+  }
+  function highlighted() { return rows()[cursor[screen]] || null; }
+
+  // ---- API ----------------------------------------------------------------
+  async function api(method, path, body) {
+    const res = await fetch(path, {
+      method,
+      headers: { Authorization: "Bearer " + token, "Content-Type": "application/json" },
+      body: body ? JSON.stringify(body) : undefined,
+      cache: "no-store",
+    });
+    let data = null;
+    try { data = await res.json(); } catch {}
+    if (res.status === 401) { askToken(); throw new Error("Token rejected"); }
+    if (res.status >= 500) throw new Error((data && data.error) || ("Server error " + res.status));
+    return { status: res.status, data };
+  }
+  function apply(s) {
+    if (!s) return;
+    state = s;
+    if (s.version !== version) { version = s.version; render(); }
+  }
+  async function refresh() {
+    if (!token) return;
+    try {
+      const { data } = await api("GET", "/api/state");
+      problem = null;
+      apply(data);
+      setSub(countLabel() + " · " + (screen === "history" ? "history" : "synced"));
+    } catch (e) {
+      problem = e.message;
+      setSub(countLabel() + " · " + e.message);
+    }
+  }
+  function startPolling() {
+    clearInterval(pollTimer);
+    pollTimer = setInterval(() => { if (!document.hidden) refresh(); }, 5000);
+  }
+
+  // ---- rendering ----------------------------------------------------------
+  const BINDINGS = {
+    main: [
+      ["p", "Pop top", () => read("top")],
+      ["b", "Take bottom", () => read("bottom")],
+      ["o", "Open (keep)", () => openHighlighted(false)],
+      ["O", "Open page", () => openHighlighted(true)],
+      ["d", "Delete", () => del()],
+      ["a", "Add", () => $("link").focus()],
+      ["h", "History", () => show("history")],
+    ],
+    history: [
+      ["r", "Re-add to stack", () => restore()],
+      ["o", "Open PDF", () => openHighlighted(false)],
+      ["x", "Forget", () => forget()],
+      ["esc", "Back", () => show("main")],
+    ],
+  };
+
+  function renderFooter() {
+    const f = $("footer");
+    f.replaceChildren();
+    for (const [key, label, action] of BINDINGS[screen]) {
+      const b = document.createElement("button");
+      const k = document.createElement("kbd");
+      k.textContent = key;
+      b.append(k, document.createTextNode(label));
+      b.addEventListener("click", () => { action(); });
+      f.appendChild(b);
+    }
+    const spacer = document.createElement("span");
+    spacer.className = "spacer";
+    const hint = document.createElement("span");
+    hint.className = "palette";
+    hint.textContent = screen === "main" ? "↑↓ move" : "↑↓ move";
+    f.append(spacer, hint);
+  }
+
+  function render() {
+    const list = rows();
+    cursor[screen] = list.length ? Math.min(cursor[screen], list.length - 1) : 0;
+
+    const body = (screen === "main" ? $("stack") : $("hstack")).querySelector("tbody");
+    body.replaceChildren();
+    list.forEach((p, i) => {
+      const tr = document.createElement("tr");
+      if (i === cursor[screen]) tr.className = "cursor";
+      const cells = screen === "main"
+        ? [[String(i + 1), "c-idx"], [p.title || p.url, null], [p.pdf_url ? "yes" : "-", "c-pdf"], [fmt(p.added_at), "c-when"]]
+        : [[p.title || p.url, null], [fmt(p.read_at), "c-read"]];
+      for (const [text, cls] of cells) {
+        const td = document.createElement("td");
+        if (cls) td.className = cls;
+        td.textContent = text;
+        td.title = text;
+        tr.appendChild(td);
+      }
+      tr.addEventListener("click", () => {
+        // Touch has no double-click: tapping the already-selected row opens it.
+        if (i === cursor[screen] && matchMedia("(pointer: coarse)").matches) return openHighlighted(false);
+        cursor[screen] = i;
+        paint();
+      });
+      tr.addEventListener("dblclick", () => openHighlighted(false));
+      body.appendChild(tr);
+    });
+
+    if (screen === "main") $("empty").hidden = list.length > 0;
+    else $("hempty").hidden = list.length > 0;
+    setSub(countLabel() + " · " + (problem || (screen === "history" ? "history" : "synced")));
+    renderFooter();
+  }
+
+  function paint() {
+    const body = (screen === "main" ? $("stack") : $("hstack")).querySelector("tbody");
+    [...body.children].forEach((tr, i) => tr.classList.toggle("cursor", i === cursor[screen]));
+    const on = body.children[cursor[screen]];
+    if (on) on.scrollIntoView({ block: "nearest" });
+  }
+
+  function show(name) {
+    screen = name;
+    $("main").classList.toggle("on", name === "main");
+    $("history").classList.toggle("on", name === "history");
+    render();
+  }
+
+  function move(delta) {
+    const list = rows();
+    if (!list.length) return;
+    cursor[screen] = Math.max(0, Math.min(list.length - 1, cursor[screen] + delta));
+    paint();
+  }
+
+  // ---- actions ------------------------------------------------------------
+  async function mutate(method, path, body, okMessage) {
+    try {
+      const { status, data } = await api(method, path, body);
+      if (data && data.state) apply(data.state);
+      if (status === 404) toast("Not found (already gone?)", true);
+      else if (okMessage) toast(okMessage);
+    } catch (e) { toast(e.message, true); }
+  }
+  async function add(raw) {
+    const text = (raw || "").trim();
+    if (!text) return;
+    try {
+      const { status, data } = await api("POST", "/api/papers", { url: text });
+      if (data && data.state) apply(data.state);
+      if (status === 409) toast("Already on the stack", true);
+      else if (status === 400) toast((data && data.error) || "Not a link", true);
+      else { toast("Added"); $("link").value = ""; $("link").focus(); }  // keep typing, like the TUI Input
+    } catch (e) { toast(e.message, true); }
+  }
+  // Open the tab synchronously (popup blockers), then point it at the PDF once the server answers.
+  async function read(kind) {
+    const win = window.open("about:blank", "_blank");
+    try {
+      const { data } = await api("POST", kind === "top" ? "/api/pop" : "/api/take");
+      if (data && data.state) apply(data.state);
+      if (!data || !data.paper) { if (win) win.close(); toast("Stack is empty", true); return; }
+      const target = readUrl(data.paper);
+      if (win) win.location = target; else window.open(target, "_blank", "noopener");
+      toast("Reading from " + kind + ": " + data.paper.title);
+    } catch (e) { if (win) win.close(); toast(e.message, true); }
+  }
+  function openHighlighted(page) {
+    const p = highlighted();
+    if (!p) return;
+    window.open(page ? p.url : readUrl(p), "_blank", "noopener");
+  }
+  function del() {
+    const p = highlighted();
+    if (!p || screen !== "main") return;
+    mutate("DELETE", "/api/papers?url=" + encodeURIComponent(p.url), null, "Removed: " + p.title);
+  }
+  function restore() {
+    const p = highlighted();
+    if (!p || screen !== "history") return;
+    mutate("POST", "/api/history/restore", { url: p.url }, "Back on the stack: " + p.title);
+  }
+  function forget() {
+    const p = highlighted();
+    if (!p || screen !== "history") return;
+    mutate("DELETE", "/api/history?url=" + encodeURIComponent(p.url), null, "Forgotten: " + p.title);
+  }
+
+  // ---- keyboard (mirrors the TUI bindings) --------------------------------
+  document.addEventListener("keydown", (e) => {
+    if ($("tokenDialog").open) return;
+    const typing = document.activeElement === $("link");
+    if (typing) {
+      if (e.key === "Enter") { e.preventDefault(); add($("link").value); }
+      else if (e.key === "Escape") { e.preventDefault(); $("link").blur(); }
+      return;
+    }
+    if (e.metaKey || e.ctrlKey || e.altKey) return;
+    const k = e.key;
+    if (k === "ArrowDown" || k === "j") { e.preventDefault(); return move(1); }
+    if (k === "ArrowUp" || k === "k") { e.preventDefault(); return move(-1); }
+    if (k === "Home") { e.preventDefault(); cursor[screen] = 0; return paint(); }
+    if (k === "End") { e.preventDefault(); cursor[screen] = Math.max(0, rows().length - 1); return paint(); }
+    if (screen === "history") {
+      if (k === "r" || k === "Enter") { e.preventDefault(); return restore(); }
+      if (k === "o") { e.preventDefault(); return openHighlighted(false); }
+      if (k === "x") { e.preventDefault(); return forget(); }
+      if (k === "Escape" || k === "h" || k === "q") { e.preventDefault(); return show("main"); }
+      return;
+    }
+    if (k === "p") { e.preventDefault(); return read("top"); }
+    if (k === "b") { e.preventDefault(); return read("bottom"); }
+    if (k === "o") { e.preventDefault(); return openHighlighted(false); }
+    if (k === "O") { e.preventDefault(); return openHighlighted(true); }
+    if (k === "d") { e.preventDefault(); return del(); }
+    if (k === "a") { e.preventDefault(); return $("link").focus(); }
+    if (k === "h") { e.preventDefault(); return show("history"); }
+  });
+
+  // ---- token --------------------------------------------------------------
+  function askToken() {
+    const dlg = $("tokenDialog");
+    if (!dlg.open) { $("token").value = ""; dlg.showModal(); }
+  }
+  $("tokenForm").addEventListener("submit", () => {
+    token = $("token").value.trim();
+    try { localStorage.setItem(TOKEN_KEY, token); } catch {}
+    version = -1;
+    refresh().then(startPolling);
+  });
+  $("header").addEventListener("dblclick", askToken);
+
+  // ---- wiring -------------------------------------------------------------
+  document.addEventListener("visibilitychange", () => { if (!document.hidden) refresh(); });
+  window.addEventListener("focus", refresh);
+
+  // Share target / deep link: /?url=... or /?text=... (Android share sheet puts the link in text).
+  const params = new URLSearchParams(location.search);
+  const shared = params.get("url") || extractUrl(params.get("text")) || extractUrl(params.get("title"));
+  if (params.has("url") || params.has("text") || params.has("title")) history.replaceState(null, "", "/");
+
+  if ("serviceWorker" in navigator) navigator.serviceWorker.register("/sw.js").catch(() => {});
+
+  render();
+  if (!token) { setSub("no token"); askToken(); }
+  else refresh().then(async () => { startPolling(); if (shared) { $("link").value = shared; await add(shared); } });
+})();
+</script>
+</body>
+</html>

@@ -1,0 +1,9 @@
+.venv/
+__pycache__/
+*.pyc
+.pytest_cache/
+web/node_modules/
+web/.wrangler/
+web/.env
+web/.dev.vars
+web/worker-configuration.d.ts

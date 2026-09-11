@@ -1,0 +1,208 @@
+"""Paper stack with JSON persistence."""
+
+from __future__ import annotations
+
+import json
+import os
+import tempfile
+from dataclasses import asdict, dataclass, field
+from datetime import datetime, timezone
+from pathlib import Path
+from typing import Iterator
+
+
+def default_path() -> Path:
+    base = os.environ.get("XDG_DATA_HOME") or str(Path.home() / ".local" / "share")
+    return Path(base) / "paperqueue" / "stack.json"
+
+
+def _now() -> str:
+    return datetime.now(timezone.utc).isoformat(timespec="seconds")
+
+
+@dataclass
+class Paper:
+    url: str
+    title: str = ""
+    added_at: str = field(default_factory=_now)
+    arxiv_id: str | None = None
+    pdf_url: str | None = None
+    read_at: str | None = None
+
+    @property
+    def read_url(self) -> str:
+        """What to open when reading: the PDF if known, else the page."""
+        return self.pdf_url or self.url
+
+    @property
+    def needs_resolve(self) -> bool:
+        return self.pdf_url is None or self.title == self.url
+
+    def __post_init__(self) -> None:
+        if not self.title:
+            self.title = self.url
+
+    def to_dict(self) -> dict:
+        return asdict(self)
+
+    @classmethod
+    def from_dict(cls, data: dict) -> "Paper":
+        return cls(
+            url=data["url"],
+            title=data.get("title", ""),
+            added_at=data.get("added_at") or _now(),
+            arxiv_id=data.get("arxiv_id"),
+            pdf_url=data.get("pdf_url"),
+            read_at=data.get("read_at"),
+        )
+
+
+class Stack:
+    """A stack of papers. Index -1 is the top (most recently pushed)."""
+
+    MAX_HISTORY = 500
+    remote = False
+
+    def __init__(
+        self,
+        papers: list[Paper] | None = None,
+        path: Path | None = None,
+        history: list[Paper] | None = None,
+    ):
+        self._papers: list[Paper] = list(papers or [])
+        self._history: list[Paper] = list(history or [])  # oldest first
+        self.path = path
+
+    # -- persistence -------------------------------------------------------
+
+    @classmethod
+    def load(cls, path: Path | None = None) -> "Stack":
+        path = path or default_path()
+        papers: list[Paper] = []
+        history: list[Paper] = []
+        if path.exists():
+            with path.open("r", encoding="utf-8") as f:
+                raw = json.load(f)
+            papers = [Paper.from_dict(p) for p in raw.get("papers", [])]
+            history = [Paper.from_dict(p) for p in raw.get("history", [])]
+        return cls(papers, path, history)
+
+    def save(self) -> None:
+        if self.path is None:
+            return
+        self.path.parent.mkdir(parents=True, exist_ok=True)
+        payload = {
+            "version": 1,
+            "papers": [asdict(p) for p in self._papers],
+            "history": [asdict(p) for p in self._history],
+        }
+        fd, tmp = tempfile.mkstemp(prefix=".stack-", suffix=".tmp", dir=self.path.parent)
+        try:
+            with os.fdopen(fd, "w", encoding="utf-8") as f:
+                json.dump(payload, f, indent=2)
+            os.replace(tmp, self.path)
+        except BaseException:
+            try:
+                os.unlink(tmp)
+            except OSError:
+                pass
+            raise
+
+    # -- stack ops ---------------------------------------------------------
+
+    def push(self, paper: Paper) -> bool:
+        """Push a paper. Returns False (and does nothing) if the URL is already queued."""
+        if self.find(paper.url) is not None:
+            return False
+        self._papers.append(paper)
+        return True
+
+    def _archive(self, paper: Paper | None) -> Paper | None:
+        """Move a paper that left the stack into history (newest last)."""
+        if paper is None:
+            return None
+        paper.read_at = _now()
+        self._history = [h for h in self._history if h.url != paper.url]
+        self._history.append(paper)
+        del self._history[: -self.MAX_HISTORY]
+        return paper
+
+    def pop(self) -> Paper | None:
+        """Remove and return the top (most recent) paper, recording it in history."""
+        return self._archive(self._papers.pop() if self._papers else None)
+
+    def take_bottom(self) -> Paper | None:
+        """Remove and return the bottom (oldest) paper, recording it in history."""
+        return self._archive(self._papers.pop(0) if self._papers else None)
+
+    def remove(self, url: str) -> Paper | None:
+        paper = self.find(url)
+        if paper is not None:
+            self._papers.remove(paper)
+        return self._archive(paper)
+
+    # -- history -----------------------------------------------------------
+
+    def history_newest_first(self) -> list[Paper]:
+        return list(reversed(self._history))
+
+    def history_oldest_first(self) -> list[Paper]:
+        return list(self._history)
+
+    def find_history(self, url: str) -> Paper | None:
+        return next((p for p in self._history if p.url == url), None)
+
+    def restore(self, url: str) -> Paper | None:
+        """Move a paper from history back onto the top of the stack."""
+        paper = self.find_history(url)
+        if paper is None:
+            return None
+        self._history.remove(paper)
+        if self.find(url) is not None:
+            return paper  # already queued again; just drop the history entry
+        paper.read_at = None
+        paper.added_at = _now()
+        self._papers.append(paper)
+        return paper
+
+    def forget(self, url: str) -> Paper | None:
+        """Drop a paper from history for good."""
+        paper = self.find_history(url)
+        if paper is not None:
+            self._history.remove(paper)
+        return paper
+
+    def find(self, url: str) -> Paper | None:
+        return next((p for p in self._papers if p.url == url), None)
+
+    def update_title(self, url: str, title: str) -> bool:
+        return self.update(url, title=title)
+
+    def update(
+        self,
+        url: str,
+        *,
+        title: str | None = None,
+        pdf_url: str | None = None,
+        arxiv_id: str | None = None,
+    ) -> bool:
+        """Apply resolved metadata. Returns False if the paper is gone."""
+        paper = self.find(url)
+        if paper is None:
+            return False
+        if title:
+            paper.title = title
+        if pdf_url:
+            paper.pdf_url = pdf_url
+        if arxiv_id:
+            paper.arxiv_id = arxiv_id
+        return True
+
+    def top_first(self) -> list[Paper]:
+        return list(reversed(self._papers))
+
+    def __iter__(self) -> Iterator[Paper]:
+        return iter(self._papers)
+
+    def __len__(self) -> int:
+        return len(self._papers)
