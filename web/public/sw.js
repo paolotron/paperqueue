@@ -1,6 +1,6 @@
 // Minimal service worker: caches the app shell so the page installs and opens offline.
 // API calls are never cached.
-const CACHE = "paperqueue-v1";
+const CACHE = "paperqueue-v2";
 const SHELL = ["/", "/manifest.webmanifest", "/icon.svg", "/icon-192.png", "/icon-512.png"];
 
 self.addEventListener("install", (event) => {

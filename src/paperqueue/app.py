@@ -10,14 +10,57 @@ from textual import work
 from textual.app import App, ComposeResult
 from textual.binding import Binding
 from textual.screen import Screen
+from textual.theme import Theme
 from textual.widgets import DataTable, Footer, Header, Input, Static
 
 from paperqueue import links, opener
-from paperqueue.config import load_server_config
+from paperqueue.config import load_server_config, load_theme, save_theme
 from paperqueue.remote import RemoteError, RemoteStack
 from paperqueue.store import Paper, Stack
 
 POLL_SECONDS = 5
+
+# The same De Stijl palette the web client uses, so both ports look like one app.
+THEMES = [
+    Theme(
+        name="destijl",
+        primary="#0a3ea8", secondary="#d42a1e", accent="#f3c000",
+        warning="#f3c000", error="#d42a1e", success="#0a3ea8",
+        background="#fcfbf7", surface="#fcfbf7", panel="#efece3", foreground="#111214",
+        dark=False,
+        variables={
+            "block-cursor-background": "#f3c000", "block-cursor-foreground": "#111214",
+            "block-cursor-text-style": "bold", "footer-key-foreground": "#d42a1e",
+            "border": "#111214", "border-blurred": "#111214",
+            "input-cursor-background": "#111214", "input-cursor-foreground": "#fcfbf7",
+        },
+    ),
+    Theme(
+        name="graph",
+        primary="#14213d", secondary="#d42a1e", accent="#0a3ea8",
+        warning="#f3c000", error="#d42a1e", success="#0a3ea8",
+        background="#faf8f2", surface="#faf8f2", panel="#e8eaee", foreground="#14213d",
+        dark=False,
+        variables={
+            "block-cursor-background": "#b9c7d6", "block-cursor-foreground": "#14213d",
+            "block-cursor-text-style": "bold", "footer-key-foreground": "#d42a1e",
+            "border": "#14213d", "border-blurred": "#8ba0b6",
+        },
+    ),
+    Theme(
+        name="destijl-dark",
+        primary="#5a86e8", secondary="#f0574a", accent="#f2cc4a",
+        warning="#f2cc4a", error="#f0574a", success="#5a86e8",
+        background="#0e0f11", surface="#0e0f11", panel="#17181b", foreground="#f1efe8",
+        dark=True,
+        variables={
+            "block-cursor-background": "#f2cc4a", "block-cursor-foreground": "#0e0f11",
+            "block-cursor-text-style": "bold", "footer-key-foreground": "#f0574a",
+            "border": "#f1efe8", "border-blurred": "#5b5d61",
+        },
+    ),
+]
+THEME_NAMES = [t.name for t in THEMES]
 
 
 def _fmt_added(iso: str) -> str:
@@ -117,6 +160,7 @@ class PaperQueue(App[None]):
         Binding("d", "delete", "Delete"),
         Binding("a", "focus_input", "Add"),
         Binding("h", "history", "History"),
+        Binding("t", "cycle_theme", "Theme"),
         Binding("q", "quit", "Quit"),
     ]
 
@@ -135,6 +179,10 @@ class PaperQueue(App[None]):
         yield Footer()
 
     def on_mount(self) -> None:
+        for theme in THEMES:
+            self.register_theme(theme)
+        saved = load_theme()
+        self.theme = saved if saved in THEME_NAMES else THEME_NAMES[0]
         table = self.query_one(DataTable)
         table.add_column("#", key="idx", width=4)
         table.add_column("Title", key="title")
@@ -278,6 +326,13 @@ class PaperQueue(App[None]):
         self.stack.save()
         self.refresh_table()
         self.notify(f"Removed: {paper.title}")
+
+    def action_cycle_theme(self) -> None:
+        """Cycle the De Stijl palettes, mirroring `t` in the web client."""
+        i = THEME_NAMES.index(self.theme) if self.theme in THEME_NAMES else -1
+        self.theme = THEME_NAMES[(i + 1) % len(THEME_NAMES)]
+        save_theme(self.theme)
+        self.notify(f"theme: {self.theme}")
 
     def action_focus_input(self) -> None:
         self.query_one(Input).focus()

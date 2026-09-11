@@ -20,6 +20,7 @@ uv tool install .          # or install the `paperqueue` command globally
 | `d` | delete the highlighted paper |
 | `a` / `Esc` | focus the input / the list |
 | `h` | history of read papers: `r`/`Enter` re-adds one to the top of the stack, `o` opens it, `x` forgets it, `Esc` goes back |
+| `t` | cycle the De Stijl palettes (remembered in `~/.config/paperqueue/ui.toml`) |
 | `q` | quit |
 
 Reading opens the PDF when one can be found: arXiv links, pages with a PDF link or `citation_pdf_url`,
@@ -52,9 +53,21 @@ exposes a small JSON API and resolves titles/PDFs itself. One secret token prote
 
 - **Phone / browser**: open the Worker URL, paste the access token once, then "Add to Home Screen".
   On Android the installed app also appears in the share sheet, so links can be shared straight to the stack.
-  The page mirrors the TUI: same table, same key bindings (`p`/`b`/`o`/`O`/`d`/`a`/`h`, `↑↓` or `j`/`k` to move,
-  `Esc` to leave the input, `r`/`x` in history). On a phone, tap a row to put the cursor on it and tap a key in
-  the footer bar to act on it. Quick-add from any desktop browser with a bookmarklet:
+  Same key bindings as the TUI (`p`/`b`/`o`/`O`/`d`/`a`/`h`, `↑↓` or `j`/`k` to move, `Esc` to leave the input,
+  `r`/`x` in history). On a phone, tap a paper to put the cursor on it and tap a key in the footer bar to act on
+  it; tapping it again opens the PDF.
+
+  The stack can be drawn four ways — `v` cycles them, and the footer key doubles as the readout:
+
+  | layout | what it is |
+  |---|---|
+  | `mondrian` | a De Stijl composition: one rectangle per paper, area by position in the stack, a minority of blocks in red/blue/yellow. Deterministic — the same stack always paints the same picture, and a paper keeps its colour for life. Pages when there are more papers than the canvas can hold legibly. |
+  | `clues` | a crossword clue list: boxed numerals, titles as clues, the cursor as the current entry |
+  | `picross` | nonogram rows on graph paper; the margin numbers are the real run-lengths of each row's cells, which encode age, PDF, arXiv id |
+  | `table` | the plain table: `#`, title, PDF, added |
+
+  `t` cycles the palette: `destijl` (white, black rules, primaries), `graph` (ruled paper), `dark`, `system`.
+  Both choices are remembered per device. Quick-add from any desktop browser with a bookmarklet:
 
   ```
   javascript:location.href='https://paperqueue.<subdomain>.workers.dev/?url='+encodeURIComponent(location.href)

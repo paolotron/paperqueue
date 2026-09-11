@@ -1,151 +1,301 @@
 <!doctype html>
-<html lang="en">
+<html lang="en" data-theme="destijl" data-layout="mondrian">
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
 <title>paperqueue</title>
-<meta name="theme-color" content="#242f38">
+<meta id="themeColor" name="theme-color" content="#fcfbf7">
 <link rel="manifest" href="/manifest.webmanifest">
 <link rel="icon" href="/icon.svg" type="image/svg+xml">
 <link rel="apple-touch-icon" href="/icon-192.png">
+<script>
+  // Apply the stored look before first paint, so there is no flash of the wrong palette.
+  try {
+    var d = document.documentElement;
+    d.dataset.theme = localStorage.getItem("paperqueue.theme") || "destijl";
+    d.dataset.layout = localStorage.getItem("paperqueue.layout") || "mondrian";
+  } catch (e) {}
+</script>
 <style>
-  /* Palette lifted from the Textual dark theme the TUI renders with. */
+  /* ============================================================ pigments ==
+     Nothing below names a colour literal. Themes rebind the --a-* aliases;
+     the semantic block maps those to the names every layout consumes. */
   :root {
-    --bg: #121212; --panel: #1c1c1c; --stripe: #272727; --bar: #242f38; --line: #2d3740;
-    --accent: #0178d4; --text: #e0e0e0; --muted: #a0a3a6; --on-accent: #ddedf9;
-    --key: #ffa62b; --faint: #495259; --danger: #e07a5f; --ok: #4caf50;
+    --p-red:#d42a1e; --p-blue:#0a3ea8; --p-yellow:#f3c000; --p-ink:#111214; --p-paper:#fcfbf7;
+    --d-red:#f0574a; --d-blue:#5a86e8; --d-yellow:#f2cc4a; --d-ink:#f1efe8; --d-paper:#0e0f11; --d-panel:#17181b;
+    --g-paper:#faf8f2; --g-grid:#b9c7d6;
+
+    --a-ground: var(--p-paper); --a-panel: var(--p-paper); --a-ink: var(--p-ink);
+    --a-red: var(--p-red); --a-blue: var(--p-blue); --a-yellow: var(--p-yellow);
+    --a-grid: transparent;
+  }
+
+  /* ========================================================== semantics == */
+  :root {
+    --ground: var(--a-ground);
+    --panel:  var(--a-panel);
+    --fg:     var(--a-ink);
+    --muted:  color-mix(in srgb, var(--a-ink) 52%, var(--a-ground));
+    --rule:   var(--a-ink);
+    --rule-w: 3px; --rule-heavy: 6px; --gutter: 10px;
+    --grid:   var(--a-grid); --grid-step: 22px;
+    --guide:  color-mix(in srgb, var(--a-blue) 16%, transparent);
+    --red: var(--a-red); --blue: var(--a-blue); --yellow: var(--a-yellow);
+    --fill-ink: var(--a-ink); --on-fill: var(--a-ground);
+    --cursor-bg: var(--a-yellow); --cursor-fg: var(--a-ink);
+    --accent: var(--a-blue); --key: var(--a-red); --danger: var(--a-red);
+    --cell: 20px;
+    --sans: ui-sans-serif, "Helvetica Neue", Helvetica, Arial, sans-serif;
+    --mono: ui-monospace, "Fira Code", "JetBrains Mono", "SF Mono", Menlo, Consolas, monospace;
+    color-scheme: light;
+  }
+
+  /* ============================================================= themes == */
+  [data-theme="graph"] {
+    --a-ground: var(--g-paper); --a-panel: var(--g-paper); --a-grid: var(--g-grid);
+    --rule-w: 2px; --rule-heavy: 4px;
+  }
+  [data-theme="dark"] {
+    --a-ground: var(--d-paper); --a-panel: var(--d-panel); --a-ink: var(--d-ink);
+    --a-red: var(--d-red); --a-blue: var(--d-blue); --a-yellow: var(--d-yellow);
     color-scheme: dark;
   }
+  [data-theme="system"] { color-scheme: light dark; }
+  @media (prefers-color-scheme: dark) {
+    [data-theme="system"] {
+      --a-ground: var(--d-paper); --a-panel: var(--d-panel); --a-ink: var(--d-ink);
+      --a-red: var(--d-red); --a-blue: var(--d-blue); --a-yellow: var(--d-yellow);
+      color-scheme: dark;
+    }
+  }
+
+  /* ============================================================== frame == */
   * { box-sizing: border-box; }
   html { height: 100%; -webkit-text-size-adjust: 100%; }
   body {
-    height: 100%; height: 100dvh;
-    margin: 0; background: var(--bg); color: var(--text);
-    font: 14px/1.35 ui-monospace, "Fira Code", "JetBrains Mono", "SF Mono", Menlo, Consolas, monospace;
+    height: 100%; height: 100dvh; margin: 0;
+    background: var(--ground); color: var(--fg);
+    font: 14px/1.4 var(--sans);
     display: flex; flex-direction: column; overflow: hidden;
     padding-top: env(safe-area-inset-top);
   }
 
-  /* ---- header / footer bars (Textual Header + Footer) ---- */
-  .bar { background: var(--bar); flex: none; }
-  #header { text-align: center; padding: 4px 8px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-  #header b { font-weight: 700; color: var(--text); }
-  #header span { color: var(--muted); }
-  #footer { display: flex; flex-wrap: wrap; gap: 0 4px; padding: 4px 6px calc(4px + env(safe-area-inset-bottom)); }
-  #footer button {
-    font: inherit; background: none; border: 0; color: var(--muted); cursor: pointer;
-    padding: 3px 6px; border-radius: 3px; touch-action: manipulation; white-space: nowrap;
+  #header {
+    flex: none; display: flex; align-items: baseline; gap: 8px;
+    padding: 8px 12px; border-bottom: var(--rule-heavy) solid var(--rule);
+    white-space: nowrap; overflow: hidden;
   }
-  #footer button kbd { font: inherit; color: var(--key); font-weight: 700; margin-right: 5px; }
-  #footer button:hover, #footer button:focus-visible { background: var(--line); outline: none; }
-  #footer .spacer { flex: 1; }
-  #footer .palette { color: var(--faint); align-self: center; padding-right: 4px; font-size: 12px; }
+  #header b { font-size: 17px; letter-spacing: .02em; }
+  #header .mark { width: 13px; height: 13px; background: var(--red); flex: none; align-self: center; }
+  #sub { color: var(--muted); font-size: 12px; overflow: hidden; text-overflow: ellipsis; }
 
-  /* ---- screens ---- */
+  #footer {
+    flex: none; display: flex; flex-wrap: wrap; align-items: center; gap: 2px 4px;
+    padding: 4px 6px calc(4px + env(safe-area-inset-bottom));
+    border-top: var(--rule-heavy) solid var(--rule);
+  }
+  #footer button {
+    font: 13px/1.3 var(--mono); background: none; border: 0; color: var(--fg);
+    padding: 4px 6px; cursor: pointer; touch-action: manipulation; white-space: nowrap;
+  }
+  #footer button kbd { font: inherit; font-weight: 700; color: var(--key); margin-right: 5px; }
+  #footer button:hover, #footer button:focus-visible { background: var(--cursor-bg); color: var(--cursor-fg); outline: none; }
+  #footer button:hover kbd, #footer button:focus-visible kbd { color: var(--cursor-fg); }
+  #footer .spacer { flex: 1; }
+  #footer .chrome { color: var(--muted); }
+
   .screen { flex: 1; min-height: 0; display: none; flex-direction: column; }
   .screen.on { display: flex; }
+  .stage { flex: 1; min-height: 0; position: relative; margin: 10px 12px; }
+  .host { height: 100%; overflow: auto; }
+  .empty { position: absolute; inset: 0; display: flex; align-items: center; justify-content: center;
+           text-align: center; color: var(--muted); padding: 24px; }
+  .empty[hidden] { display: none; }   /* a class rule setting display beats the UA's [hidden] */
 
-  /* ---- input (Textual Input) ---- */
-  #inputwrap { flex: none; margin: 8px 12px 0; }
+  #inputwrap { flex: none; margin: 10px 12px 0; }
   #link {
-    width: 100%; font: inherit; color: var(--text); background: var(--panel);
-    border: 1px solid var(--line); border-radius: 0; padding: 6px 10px;
+    width: 100%; font: 14px/1.3 var(--mono); color: var(--fg); background: var(--panel);
+    border: var(--rule-w) solid var(--rule); border-radius: 0; padding: 8px 10px;
   }
   #link::placeholder { color: var(--muted); }
-  #link:focus { outline: none; border-color: var(--accent); }
+  #link:focus { outline: var(--rule-w) solid var(--blue); outline-offset: 0; }
+  #hint { display: none; }
 
-  /* ---- table (Textual DataTable) ---- */
-  .tablewrap { flex: 1; min-height: 0; overflow: auto; margin: 8px 12px; background: var(--panel); }
-  table { width: 100%; border-collapse: collapse; table-layout: fixed; }
-  th {
-    text-align: left; font-weight: 700; color: var(--text); background: var(--panel);
-    padding: 2px 8px; position: sticky; top: 0; z-index: 1; white-space: nowrap;
+  /* graph ruling: one gradient pair, invisible wherever --grid is transparent */
+  .stage {
+    background-image: linear-gradient(var(--grid) 1px, transparent 1px),
+                      linear-gradient(90deg, var(--grid) 1px, transparent 1px);
+    background-size: var(--grid-step) var(--grid-step);
   }
-  td { padding: 2px 8px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-  tbody tr:nth-child(even) { background: var(--stripe); }
-  tbody tr { cursor: pointer; touch-action: manipulation; }
-  tbody tr.cursor, tbody tr.cursor:nth-child(even) { background: var(--accent); }
-  tbody tr.cursor td { color: var(--on-accent); font-weight: 700; }
+
+  /* ======================================================= layout: skin == */
+  [data-layout="skin"] table { width: 100%; border-collapse: collapse; table-layout: fixed; font-family: var(--mono); }
+  [data-layout="skin"] th {
+    text-align: left; font-weight: 700; padding: 4px 8px; white-space: nowrap;
+    position: sticky; top: 0; background: var(--ground); border-bottom: var(--rule-w) solid var(--rule);
+  }
+  [data-layout="skin"] td { padding: 4px 8px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  [data-layout="skin"] tbody tr { cursor: pointer; touch-action: manipulation;
+                                  content-visibility: auto; contain-intrinsic-size: auto 30px; }
+  [data-layout="skin"] tbody tr:nth-child(even) { background: color-mix(in srgb, var(--fg) 7%, transparent); }
+  [data-layout="skin"] tbody tr.cursor { background: var(--cursor-bg); color: var(--cursor-fg); font-weight: 700; }
   .c-idx { width: 3.5em; color: var(--muted); }
+  [data-layout="skin"] tr.cursor .c-idx { color: var(--cursor-fg); }
   .c-pdf { width: 4em; }
-  .c-when { width: 11.5em; }
-  .c-read { width: 11.5em; }
-  tbody tr.cursor .c-idx { color: var(--on-accent); }
-  .empty { color: var(--muted); text-align: center; padding: 32px 12px; }
+  .c-when, .c-read { width: 11.5em; }
 
-  /* ---- token dialog + notification (Textual toast) ---- */
-  dialog {
-    border: 1px solid var(--line); background: var(--panel); color: var(--text);
-    padding: 16px; width: calc(100% - 32px); max-width: 380px; font: inherit;
+  /* ====================================================== layout: clues == */
+  [data-layout="clues"] .clues { list-style: none; margin: 0; padding: 0; column-gap: 28px; }
+  [data-layout="clues"] li {
+    display: flex; align-items: flex-start; gap: 10px; padding: 5px 6px; cursor: pointer;
+    break-inside: avoid; touch-action: manipulation;
+    content-visibility: auto; contain-intrinsic-size: auto 34px;
   }
-  dialog::backdrop { background: rgba(0,0,0,.6); }
-  dialog input { width: 100%; font: inherit; padding: 6px 10px; margin: 10px 0 12px;
-                 background: var(--bg); color: var(--text); border: 1px solid var(--line); }
-  dialog button { width: 100%; font: inherit; padding: 6px; background: var(--accent); color: var(--on-accent);
-                  border: 1px solid var(--accent); cursor: pointer; }
+  [data-layout="clues"] .num {
+    flex: none; min-width: 1.9em; height: 1.9em; display: flex; align-items: center; justify-content: center;
+    border: var(--rule-w) solid var(--rule); font: 700 12px/1 var(--mono); font-variant-numeric: tabular-nums;
+    background: var(--panel);
+  }
+  [data-layout="clues"] .clue { flex: 1; min-width: 0; overflow-wrap: anywhere; }
+  [data-layout="clues"] .enum { color: var(--muted); font: 11px/1.9 var(--mono); white-space: nowrap; }
+  [data-layout="clues"] li.cursor { background: var(--cursor-bg); color: var(--cursor-fg); }
+  [data-layout="clues"] li.cursor .num { background: var(--cursor-fg); color: var(--cursor-bg); border-color: var(--cursor-fg); }
+  [data-layout="clues"] li.cursor .enum { color: var(--cursor-fg); }
+  @media (min-width: 900px) { [data-layout="clues"] .clues { columns: 2; } }
+
+  /* =================================================== layout: nonogram == */
+  [data-layout="nonogram"] { position: relative; font-family: var(--mono); }
+  [data-layout="nonogram"] .colclues {
+    display: flex; margin-left: var(--clue-w); font: 10px/1.1 var(--mono); color: var(--muted);
+    border-bottom: var(--rule-w) solid var(--rule); padding-bottom: 2px;
+  }
+  [data-layout="nonogram"] .colclue { width: var(--cell); flex: none; text-align: center; white-space: pre-line; }
+  [data-layout="nonogram"] .nono-row {
+    display: flex; align-items: center; gap: 8px; cursor: pointer; touch-action: manipulation;
+    content-visibility: auto; contain-intrinsic-size: auto 30px; position: relative; z-index: 1;
+  }
+  [data-layout="nonogram"] .clue {
+    width: var(--clue-w); flex: none; text-align: right; padding-right: 6px;
+    font-variant-numeric: tabular-nums; font-size: 11px; color: var(--muted); white-space: nowrap;
+  }
+  [data-layout="nonogram"] .cells { display: flex; flex: none; pointer-events: none; }
+  [data-layout="nonogram"] .cell {
+    width: var(--cell); height: var(--cell); border: 1px solid var(--rule); margin-left: -1px;
+    background: var(--panel);
+  }
+  [data-layout="nonogram"] .cell.on { background: var(--fill-ink); }
+  [data-layout="nonogram"] .t { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  [data-layout="nonogram"] .nono-row.cursor { background: var(--cursor-bg); color: var(--cursor-fg); }
+  [data-layout="nonogram"] .nono-row.cursor .clue { color: var(--cursor-fg); }
+  /* vertical crosshair: one absolutely positioned band driven by --col */
+  [data-layout="nonogram"]::after {
+    content: ""; position: absolute; top: 0; bottom: 0; width: var(--cell);
+    left: calc(var(--clue-w) + 8px + var(--col, 0) * (var(--cell) - 1px));
+    background: var(--guide); pointer-events: none; z-index: 0;
+  }
+
+  /* =================================================== layout: mondrian == */
+  [data-layout="mondrian"].host {
+    position: absolute; inset: 0; overflow: hidden;
+    background: var(--rule); padding: calc(var(--gutter) / 2);
+  }
+  [data-layout="mondrian"].host:empty { background: none; }
+  .block {
+    position: absolute; background: var(--panel); color: var(--fg);
+    /* the gutter is the container showing through a transparent border; without
+       padding-box clipping the background paints under it and every line vanishes */
+    background-clip: padding-box;
+    border: calc(var(--gutter) / 2) solid transparent;
+    overflow: hidden; padding: 6px 8px; cursor: pointer; touch-action: manipulation;
+    display: flex; flex-direction: column; gap: 2px;
+  }
+  @media (prefers-reduced-motion: no-preference) {
+    .block { transition: left .16s ease, top .16s ease, width .16s ease, height .16s ease; }
+  }
+  .block[data-fill="red"]    { background: var(--red);    color: var(--on-fill); }
+  .block[data-fill="blue"]   { background: var(--blue);   color: var(--on-fill); }
+  .block[data-fill="yellow"] { background: var(--yellow); color: var(--p-ink); }
+  .block[data-fill="ink"]    { background: var(--fill-ink); color: var(--on-fill); }
+  .bnum { font: 700 11px/1 var(--mono); opacity: .75; }
+  .btitle { font-weight: 500; overflow: hidden; display: -webkit-box; -webkit-box-orient: vertical;
+            -webkit-line-clamp: var(--lines, 3); line-clamp: var(--lines, 3);
+            overflow-wrap: break-word; hyphens: auto; }
+  .bmeta { margin-top: auto; font: 10px/1.2 var(--mono); opacity: .7; }
+  .block.cursor { z-index: 2; outline: var(--rule-heavy) solid var(--rule); outline-offset: calc(-1 * var(--rule-heavy)); }
+  .block.cursor .btitle { font-weight: 700; }
+  .block.cursor::after { content: ""; position: absolute; right: 0; bottom: 0; width: 16px; height: 16px; background: var(--rule); }
+
+  /* ==================================================== dialog + toast == */
+  dialog {
+    border: var(--rule-heavy) solid var(--rule); background: var(--panel); color: var(--fg);
+    padding: 18px; width: calc(100% - 32px); max-width: 380px; font: inherit;
+  }
+  dialog::backdrop { background: color-mix(in srgb, var(--p-ink) 55%, transparent); }
+  dialog input { width: 100%; font: 14px var(--mono); padding: 8px 10px; margin: 10px 0 12px;
+                 background: var(--ground); color: var(--fg); border: var(--rule-w) solid var(--rule); }
+  dialog button { width: 100%; font: 700 14px var(--sans); padding: 8px; cursor: pointer;
+                  background: var(--blue); color: var(--on-fill); border: var(--rule-w) solid var(--rule); }
   dialog .hint { color: var(--muted); font-size: 12px; }
   #toast {
-    position: fixed; right: 12px; bottom: calc(40px + env(safe-area-inset-bottom));
-    background: var(--panel); color: var(--text); border-left: 3px solid var(--accent);
+    position: fixed; right: 12px; bottom: calc(46px + env(safe-area-inset-bottom));
+    background: var(--panel); color: var(--fg);
+    border: var(--rule-w) solid var(--rule); border-left: var(--rule-heavy) solid var(--blue);
     padding: 8px 12px; max-width: min(420px, calc(100% - 24px));
-    opacity: 0; transition: opacity .15s; pointer-events: none; white-space: pre-wrap;
+    opacity: 0; transition: opacity .15s; pointer-events: none; font-size: 13px;
   }
   #toast.show { opacity: 1; }
   #toast.err { border-left-color: var(--danger); }
 
-  @media (max-width: 620px) { .c-when, .c-read, .c-pdf { display: none; } }
-  #hint { display: none; }
+  /* ==================================================== small / touch == */
+  @media (max-width: 620px) {
+    .c-when, .c-read, .c-pdf { display: none; }
+    [data-layout="nonogram"] .t { font-size: 13px; }
+  }
   @media (pointer: coarse) {
-    #link { font-size: 16px; }              /* below 16px iOS zooms the page on focus */
-    th { padding: 6px 8px; }
-    td { padding: 10px 8px; }               /* ~40px rows, comfortable to tap */
+    #link { font-size: 16px; }                 /* below 16px iOS zooms the page on focus */
     #footer { gap: 2px; }
-    #footer button { padding: 12px 10px; min-height: 44px; }   /* full touch target */
-    #toast { bottom: calc(96px + env(safe-area-inset-bottom)); }  /* clear of a wrapped footer */
-    /* Without a keyboard the cursor row has to be obvious: it is what the footer keys act on. */
-    tbody tr.cursor .c-idx::before { content: "\25b8 "; }
+    #footer button { padding: 12px 10px; min-height: 44px; }
+    #footer .chrome { font-size: 12px; }
+    #footer .chrome kbd { display: none; }
     #hint { display: block; color: var(--muted); font-size: 12px; margin: 6px 12px 0; }
+    [data-layout="skin"] td { padding: 10px 8px; }
+    [data-layout="clues"] li { padding: 9px 6px; min-height: 44px; }
+    [data-layout="nonogram"] .nono-row { min-height: 44px; }
+    .block.cursor .btitle::before { content: "\25b8 "; }
+    #toast { bottom: calc(96px + env(safe-area-inset-bottom)); }
   }
 </style>
 </head>
 <body>
 
-<div id="header" class="bar"><b>paperqueue</b>— <span id="sub">connecting…</span></div>
+<div id="header"><span class="mark"></span><b>paperqueue</b><span id="sub">connecting…</span></div>
 
-<!-- main screen -->
 <section id="main" class="screen on">
   <div id="inputwrap">
     <input id="link" placeholder="Paste a paper link and press Enter" inputmode="url" enterkeyhint="done" autocomplete="off">
     <p id="hint">Tap a paper to select it, then a key below. Tap it again to open the PDF.</p>
   </div>
-  <div class="tablewrap">
-    <table id="stack">
-      <thead><tr><th class="c-idx">#</th><th>Title</th><th class="c-pdf">PDF</th><th class="c-when">Added</th></tr></thead>
-      <tbody></tbody>
-    </table>
-    <p id="empty" class="empty" hidden>Stack is empty. Paste a link above.</p>
+  <div class="stage">
+    <div class="host" id="mainHost"></div>
+    <p id="empty" class="empty" hidden></p>
   </div>
 </section>
 
-<!-- history screen -->
 <section id="history" class="screen">
-  <div class="tablewrap">
-    <table id="hstack">
-      <thead><tr><th>Title</th><th class="c-read">Read</th></tr></thead>
-      <tbody></tbody>
-    </table>
-    <p id="hempty" class="empty" hidden>No papers read yet.</p>
+  <div class="stage">
+    <div class="host" id="historyHost"></div>
+    <p id="hempty" class="empty" hidden></p>
   </div>
 </section>
 
-<div id="footer" class="bar"></div>
+<div id="footer"></div>
 
 <dialog id="tokenDialog">
   <form method="dialog" id="tokenForm">
     <strong>Access token</strong>
     <div class="hint">The TOKEN secret set on the Worker.</div>
     <input id="token" type="password" autocomplete="current-password" required>
-    <button class="primary" type="submit">Save</button>
+    <button type="submit">Save</button>
   </form>
 </dialog>
 <div id="toast" role="status"></div>
@@ -153,26 +303,35 @@
 <script>
 (() => {
   const $ = (id) => document.getElementById(id);
-  const TOKEN_KEY = "paperqueue.token";
+  const TOKEN_KEY = "paperqueue.token", LAYOUT_KEY = "paperqueue.layout", THEME_KEY = "paperqueue.theme";
+  const COARSE = matchMedia("(pointer: coarse)");
   let token = "";
   let version = -1;
   let state = { papers: [], history: [] };
   let pollTimer = null;
-  let screen = "main";          // "main" | "history"
+  let screen = "main";
   let cursor = { main: 0, history: 0 };
   let problem = null;
+  let layoutName = "mondrian";
+  let themeName = "destijl";
 
   try { token = localStorage.getItem(TOKEN_KEY) || ""; } catch {}
 
   // ---- helpers ------------------------------------------------------------
+  function el(tag, cls, text) {
+    const e = document.createElement(tag);
+    if (cls) e.className = cls;
+    if (text != null) e.textContent = text;
+    return e;
+  }
   let toastTimer;
   function toast(msg, isError) {
-    const el = $("toast");
-    el.textContent = msg;
-    el.classList.toggle("err", !!isError);
-    el.classList.add("show");
+    const t = $("toast");
+    t.textContent = msg;
+    t.classList.toggle("err", !!isError);
+    t.classList.add("show");
     clearTimeout(toastTimer);
-    toastTimer = setTimeout(() => el.classList.remove("show"), 2500);
+    toastTimer = setTimeout(() => t.classList.remove("show"), 2500);
   }
   function countLabel() {
     const n = state.papers.length;
@@ -193,10 +352,22 @@
     const m = /https?:\/\/\S+/.exec(text);
     return m ? m[0] : text.trim();
   }
-  function rows() {
-    return screen === "main" ? [...state.papers].reverse() : [...state.history].reverse();
-  }
+  function rows() { return screen === "main" ? [...state.papers].reverse() : [...state.history].reverse(); }
   function highlighted() { return rows()[cursor[screen]] || null; }
+  const host = () => (screen === "main" ? $("mainHost") : $("historyHost"));
+  const emptyEl = () => (screen === "main" ? $("empty") : $("hempty"));
+  function measure(node) {
+    const r = node.getBoundingClientRect();
+    return { w: Math.max(1, Math.round(r.width)), h: Math.max(1, Math.round(r.height)) };
+  }
+  /** FNV-1a 32-bit: stable across engines and reloads, which is the whole point. */
+  function hash32(s) {
+    let h = 0x811c9dc5;
+    for (let i = 0; i < s.length; i++) { h ^= s.charCodeAt(i); h = Math.imul(h, 0x01000193); }
+    return h >>> 0;
+  }
+  const rand01 = (key, salt) => hash32(salt + " " + key) / 4294967296;
+  const pct = (x) => (x * 100).toFixed(4) + "%";
 
   // ---- API ----------------------------------------------------------------
   async function api(method, path, body) {
@@ -223,10 +394,10 @@
       const { data } = await api("GET", "/api/state");
       problem = null;
       apply(data);
-      setSub(countLabel() + " · " + (screen === "history" ? "history" : "synced"));
+      setSub(subText());
     } catch (e) {
       problem = e.message;
-      setSub(countLabel() + " · " + e.message);
+      setSub(subText());
     }
   }
   function startPolling() {
@@ -234,90 +405,347 @@
     pollTimer = setInterval(() => { if (!document.hidden) refresh(); }, 5000);
   }
 
-  // ---- rendering ----------------------------------------------------------
-  const BINDINGS = {
-    main: [
-      ["p", "Pop top", () => read("top")],
-      ["b", "Take bottom", () => read("bottom")],
-      ["o", "Open (keep)", () => openHighlighted(false)],
-      ["O", "Open page", () => openHighlighted(true)],
-      ["d", "Delete", () => del()],
-      ["a", "Add", () => $("link").focus()],
-      ["h", "History", () => show("history")],
-    ],
-    history: [
-      ["r", "Re-add to stack", () => restore()],
-      ["o", "Open PDF", () => openHighlighted(false)],
-      ["x", "Forget", () => forget()],
-      ["esc", "Back", () => show("main")],
-    ],
+  // ---- the per-screen field spec: the only place main and history differ --
+  const FIELDS = {
+    main: {
+      index: true,
+      columns: [["#", "c-idx"], ["Title", null], ["PDF", "c-pdf"], ["Added", "c-when"]],
+      cells: (p, i) => [String(i + 1), p.title || p.url, p.pdf_url ? "yes" : "-", fmt(p.added_at)],
+      primary: (p) => p.title || p.url,
+      meta: (p) => fmt(p.added_at),
+      metaLabel: "added",
+      empty: "Stack is empty. Paste a link above.",
+    },
+    history: {
+      index: false,
+      columns: [["Title", null], ["Read", "c-read"]],
+      cells: (p) => [p.title || p.url, fmt(p.read_at)],
+      primary: (p) => p.title || p.url,
+      meta: (p) => fmt(p.read_at),
+      metaLabel: "read",
+      empty: "No papers read yet.",
+    },
   };
 
-  function renderFooter() {
-    const f = $("footer");
-    f.replaceChildren();
-    for (const [key, label, action] of BINDINGS[screen]) {
-      const b = document.createElement("button");
-      const k = document.createElement("kbd");
-      k.textContent = key;
-      b.append(k, document.createTextNode(label));
-      b.addEventListener("click", () => { action(); });
-      f.appendChild(b);
+  // ---- mondrian tiling ----------------------------------------------------
+  const TILE = {
+    ratio: 0.80,    // geometric area decay down the stack
+    minFrac: 0.55,  // smallest block >= minFrac * (1/n) of the canvas
+    minPx: 44 * 88, // legibility/touch floor, px^2
+    maxAspect: 4.2, // long/short of a leaf block
+    jitter: 0.10,   // split may deviate this much from its exact weight fraction
+    density: 56,    // aesthetic block count: sqrt(area) / density
+    colorRate: 28,  // % of blocks taking a primary
+    blackRate: 4,   // % taking ink (a subset, checked first)
+  };
+
+  /** Area shares for n papers, newest first, summing to 1, none below minFrac/n. */
+  function areaShares(n) {
+    if (n <= 1) return [1];
+    const raw = [];
+    for (let i = 0; i < n; i++) raw.push(Math.pow(TILE.ratio, i));
+    const total = raw.reduce((a, b) => a + b, 0);
+    const w = raw.map((x) => x / total);
+    const floor = TILE.minFrac / n;
+    // Raw weights are non-increasing, so the blocks under the floor are always a
+    // suffix: find how many to pin, then rescale the rest. One pass, no water-fill.
+    let m = 0;
+    for (; m < n - 1; m++) {
+      const keep = n - m;
+      const head = w.slice(0, keep).reduce((a, b) => a + b, 0);
+      const s = (1 - m * floor) / head;
+      if (w[keep - 1] * s >= floor - 1e-12) break;
     }
-    const spacer = document.createElement("span");
-    spacer.className = "spacer";
-    const hint = document.createElement("span");
-    hint.className = "palette";
-    hint.textContent = screen === "main" ? "↑↓ move" : "↑↓ move";
-    f.append(spacer, hint);
+    const keep = n - m;
+    const s = (1 - m * floor) / w.slice(0, keep).reduce((a, b) => a + b, 0);
+    return w.map((x, i) => (i < keep ? x * s : floor));
   }
 
+  /** How many blocks this canvas should hold: legibility ∩ taste. */
+  function capacity(w, h) {
+    const legible = Math.floor((TILE.minFrac * w * h) / TILE.minPx);
+    const tasteful = Math.round(Math.sqrt(w * h) / TILE.density);
+    return Math.max(3, Math.min(24, legible, tasteful));
+  }
+  const pageOf = (i, cap) => Math.floor(i / cap);
+
+  function cutRect(r, vertical, f) {
+    return vertical
+      ? [{ x: r.x, y: r.y, w: r.w * f, h: r.h }, { x: r.x + r.w * f, y: r.y, w: r.w * (1 - f), h: r.h }]
+      : [{ x: r.x, y: r.y, w: r.w, h: r.h * f }, { x: r.x, y: r.y + r.h * f, w: r.w, h: r.h * (1 - f) }];
+  }
+  /** Penalty for a sub-rect holding n blocks: a leaf sliver is unreadable, an
+   *  interior node may be skinny because its own cuts will square it up. */
+  function shapeCost(r, n, aspect) {
+    const w = r.w * aspect, ar = Math.max(w / r.h, r.h / w);
+    return Math.max(0, ar - (n === 1 ? TILE.maxAspect : TILE.maxAspect * 1.6));
+  }
+  /** Recursive guillotine cut. Pure in (keys, shares, aspect, jitter): no time, no DOM. */
+  function tile(items, rect, aspect, jitter, out) {
+    if (items.length === 1) { out.push({ ...items[0], ...rect }); return; }
+    const total = items.reduce((a, it) => a + it.share, 0);
+    let cut = 1, bestErr = Infinity, headShare = items[0].share, acc = 0;
+    for (let i = 0; i < items.length - 1; i++) {
+      acc += items[i].share;
+      const err = Math.abs(acc / total - 0.5);
+      if (err < bestErr) { bestErr = err; cut = i + 1; headShare = acc; }
+    }
+    const base = headShare / total;
+    const key = items[0].key;                    // the subtree's identity: its newest paper
+    const natural = rect.w * aspect > rect.h;    // cut across the physically longer side
+    let best = null;
+    for (const vertical of [true, false]) {
+      const j = (rand01(key, vertical ? "fv" : "fh") - 0.5) * 2 * jitter;
+      const f = Math.min(0.88, Math.max(0.12, base + j * Math.min(base, 1 - base)));
+      const [a, b] = cutRect(rect, vertical, f);
+      const score = shapeCost(a, cut, aspect) + shapeCost(b, items.length - cut, aspect)
+                  + (vertical === natural ? 0 : 0.18);
+      if (!best || score < best.score) best = { a, b, score };
+    }
+    tile(items.slice(0, cut), best.a, aspect, jitter, out);
+    tile(items.slice(cut), best.b, aspect, jitter, out);
+  }
+  /** Mondrian's rectangles are all different: one retry at double jitter if two
+   *  blocks come out congruent, then accept rather than search. */
+  function tileTop(items, aspect) {
+    let last = null;
+    for (const jitter of [TILE.jitter, TILE.jitter * 2]) {
+      const out = [];
+      tile(items, { x: 0, y: 0, w: 1, h: 1 }, aspect, jitter, out);
+      last = out;
+      const seen = new Set();
+      let clash = false;
+      for (const b of out) {
+        const sig = b.w.toFixed(3) + "x" + b.h.toFixed(3);
+        if (seen.has(sig)) { clash = true; break; }
+        seen.add(sig);
+      }
+      if (!clash) return out;
+    }
+    return last;
+  }
+  /** De Stijl fill, deterministic per URL so a paper keeps its pigment for life. */
+  function fillFor(p) {
+    const h = hash32(p.url);
+    if (h % 100 < TILE.blackRate) return "ink";
+    if (h % 100 < TILE.colorRate) return ["red", "blue", "yellow"][(h >>> 8) % 3];
+    return "";
+  }
+  const MONDRIAN = { cache: null };
+
+  // ---- nonogram encoding --------------------------------------------------
+  const CELLS = 10;
+  /** Bits 0-4 are true metadata; 5-9 come from the URL hash and are decorative,
+   *  there to make every row a distinct shape. The margin clue is the real
+   *  run-length encoding of whatever the row ends up being. */
+  function bitsFor(p) {
+    const stamp = p.added_at || p.read_at;
+    const days = stamp ? (Date.now() - new Date(stamp).getTime()) / 86400000 : 0;
+    const h = hash32(p.url);
+    const bits = [
+      days >= 1 ? 1 : 0,
+      days >= 7 ? 1 : 0,
+      p.pdf_url ? 1 : 0,
+      p.arxiv_id ? 1 : 0,
+      p.read_at ? 1 : 0,
+    ];
+    for (let k = 5; k < CELLS; k++) bits.push((h >>> (k - 5)) & 1);
+    return bits;
+  }
+  function runs(bits) {
+    const out = [];
+    let n = 0;
+    for (const b of bits) { if (b) n++; else if (n) { out.push(n); n = 0; } }
+    if (n) out.push(n);
+    return out.length ? out : [0];
+  }
+
+  // ---- layouts ------------------------------------------------------------
+  const LAYOUTS = {
+    skin: {
+      label: "table",
+      render({ container, papers, fields }) {
+        const table = el("table"), thead = el("thead"), htr = el("tr"), tb = el("tbody");
+        for (const [text, cls] of fields.columns) { const th = el("th", cls, text); htr.appendChild(th); }
+        thead.appendChild(htr);
+        papers.forEach((p, i) => {
+          const tr = el("tr");
+          tr.dataset.i = i;
+          fields.cells(p, i).forEach((text, n) => {
+            const td = el("td", fields.columns[n][1], text);
+            td.title = text;
+            tr.appendChild(td);
+          });
+          tb.appendChild(tr);
+        });
+        table.append(thead, tb);
+        container.appendChild(table);
+      },
+    },
+
+    clues: {
+      label: "clues",
+      render({ container, papers, fields }) {
+        const ol = el("ol", "clues");
+        papers.forEach((p, i) => {
+          const li = el("li");
+          li.dataset.i = i;
+          li.append(
+            el("b", "num", String(i + 1)),
+            el("span", "clue", fields.primary(p)),
+            el("span", "enum", (p.pdf_url ? "PDF · " : "") + fields.metaLabel + " " + fields.meta(p)),
+          );
+          ol.appendChild(li);
+        });
+        container.appendChild(ol);
+      },
+    },
+
+    nonogram: {
+      label: "picross",
+      pixelSensitive: true,
+      render({ container, papers, fields, size }) {
+        const clueW = Math.min(96, Math.max(52, Math.round(size.w * 0.14)));
+        const cell = Math.max(13, Math.min(24, Math.floor((size.w - clueW - 140) / CELLS)));
+        container.style.setProperty("--clue-w", clueW + "px");
+        container.style.setProperty("--cell", cell + "px");
+
+        const grids = papers.map(bitsFor);
+        const head = el("div", "colclues");
+        for (let c = 0; c < CELLS; c++) {
+          head.appendChild(el("div", "colclue", runs(grids.map((g) => g[c])).join("\n")));
+        }
+        container.appendChild(head);
+
+        papers.forEach((p, i) => {
+          const row = el("div", "nono-row");
+          row.dataset.i = i;
+          row.append(el("span", "clue", runs(grids[i]).join(" ")));
+          const cells = el("span", "cells");
+          for (const b of grids[i]) cells.appendChild(el("i", "cell" + (b ? " on" : "")));
+          const title = el("span", "t", fields.primary(p));
+          title.title = fields.primary(p);
+          row.append(cells, title);
+          container.appendChild(row);
+        });
+      },
+      paint(container, i) { container.style.setProperty("--col", String(i % CELLS)); },
+    },
+
+    mondrian: {
+      label: "mondrian",
+      pixelSensitive: true,
+      render({ container, papers, fields, cursor: cur, size }) {
+        const cap = capacity(size.w, size.h);
+        const page = pageOf(cur, cap);
+        const start = page * cap;
+        const slice = papers.slice(start, start + cap);
+        const aspect = size.w / size.h;
+        // Geometry depends on which papers are shown, never on their titles: the
+        // Worker resolves titles in the background and must not move a single line.
+        const sig = page + "|" + slice.length + "|" + Math.round(aspect * 20) + "|"
+                  + slice.map((p) => p.url).join("");
+        if (!MONDRIAN.cache || MONDRIAN.cache.sig !== sig) {
+          const shares = areaShares(slice.length);
+          const items = slice.map((p, k) => ({ key: p.url, i: start + k, share: shares[k] }));
+          MONDRIAN.cache = { sig, page, cap, blocks: tileTop(items, aspect) };
+        }
+        let anyColour = false;
+        const frag = document.createDocumentFragment();
+        for (const b of MONDRIAN.cache.blocks) {
+          const p = papers[b.i];
+          if (!p) continue;
+          const d = el("div", "block");
+          d.dataset.i = b.i;
+          const fill = fillFor(p);
+          if (fill) { d.dataset.fill = fill; anyColour = true; }
+          d.style.cssText = `left:${pct(b.x)};top:${pct(b.y)};width:${pct(b.w)};height:${pct(b.h)}`;
+          const wPx = b.w * size.w, hPx = b.h * size.h;
+          const fs = Math.max(11, Math.min(22, Math.round(Math.min(wPx * 0.028 + 9, hPx * 0.4))));
+          d.style.fontSize = fs + "px";
+          d.style.setProperty("--lines", String(Math.max(1, Math.floor((hPx - 24) / (fs * 1.3)) - (hPx > 96 ? 1 : 0))));
+          if (fields.index) d.appendChild(el("b", "bnum", String(b.i + 1)));
+          const t = el("span", "btitle", fields.primary(p));
+          t.title = fields.primary(p);
+          d.appendChild(t);
+          if (hPx > 96) d.appendChild(el("span", "bmeta", fields.meta(p)));
+          frag.appendChild(d);
+        }
+        container.appendChild(frag);
+        // Never an entirely white composition: colour the highest-hash block.
+        if (!anyColour && container.children.length) {
+          let best = null, bestH = -1;
+          for (const node of container.children) {
+            const p = papers[Number(node.dataset.i)];
+            const h = p ? hash32(p.url) : -1;
+            if (h > bestH) { bestH = h; best = node; }
+          }
+          if (best) best.dataset.fill = ["red", "blue", "yellow"][bestH % 3];
+        }
+      },
+      needsRerender(i, { size }) {
+        const cap = capacity(size.w, size.h);
+        return !!MONDRIAN.cache && MONDRIAN.cache.page !== pageOf(i, cap);
+      },
+      status(papers, _screen, size) {
+        const cap = capacity(size.w, size.h);
+        if (papers.length <= cap) return "";
+        return `page ${pageOf(cursor[screen], cap) + 1}/${Math.ceil(papers.length / cap)}`;
+      },
+    },
+  };
+  const LAYOUT_ORDER = ["mondrian", "clues", "nonogram", "skin"];
+  const THEME_ORDER = ["destijl", "graph", "dark", "system"];
+
+  // ---- render / paint -----------------------------------------------------
+  // The active layout's status (mondrian's "page 2/3") is sticky: refresh() rewrites
+  // the sub-line every poll and must not drop it.
+  let statusExtra = "";
+  function subText() {
+    const mode = problem || (screen === "history" ? "history" : "synced");
+    return countLabel() + " · " + mode + (statusExtra ? " · " + statusExtra : "");
+  }
+
+  let rendering = false;
   function render() {
-    const list = rows();
+    const list = rows(), fields = FIELDS[screen], L = LAYOUTS[layoutName];
     cursor[screen] = list.length ? Math.min(cursor[screen], list.length - 1) : 0;
 
-    const body = (screen === "main" ? $("stack") : $("hstack")).querySelector("tbody");
-    body.replaceChildren();
-    list.forEach((p, i) => {
-      const tr = document.createElement("tr");
-      if (i === cursor[screen]) tr.className = "cursor";
-      const cells = screen === "main"
-        ? [[String(i + 1), "c-idx"], [p.title || p.url, null], [p.pdf_url ? "yes" : "-", "c-pdf"], [fmt(p.added_at), "c-when"]]
-        : [[p.title || p.url, null], [fmt(p.read_at), "c-read"]];
-      for (const [text, cls] of cells) {
-        const td = document.createElement("td");
-        if (cls) td.className = cls;
-        td.textContent = text;
-        td.title = text;
-        tr.appendChild(td);
-      }
-      tr.addEventListener("click", () => {
-        // Touch has no double-click: tapping the already-selected row opens it.
-        if (i === cursor[screen] && matchMedia("(pointer: coarse)").matches) return openHighlighted(false);
-        cursor[screen] = i;
-        paint();
-      });
-      tr.addEventListener("dblclick", () => openHighlighted(false));
-      body.appendChild(tr);
-    });
+    const c = host();
+    c.dataset.layout = layoutName;
+    c.replaceChildren();
+    const e = emptyEl();
+    e.textContent = fields.empty;
+    e.hidden = list.length > 0;
 
-    if (screen === "main") $("empty").hidden = list.length > 0;
-    else $("hempty").hidden = list.length > 0;
-    setSub(countLabel() + " · " + (problem || (screen === "history" ? "history" : "synced")));
+    const size = measure(c);
+    if (list.length) L.render({ container: c, papers: list, screen, fields, cursor: cursor[screen], size });
+
+    rendering = true;
+    paint();
+    rendering = false;
+
+    statusExtra = list.length && L.status ? L.status(list, screen, size) : "";
+    setSub(subText());
     renderFooter();
   }
 
   function paint() {
-    const body = (screen === "main" ? $("stack") : $("hstack")).querySelector("tbody");
-    [...body.children].forEach((tr, i) => tr.classList.toggle("cursor", i === cursor[screen]));
-    const on = body.children[cursor[screen]];
-    if (on) on.scrollIntoView({ block: "nearest" });
+    const L = LAYOUTS[layoutName], c = host(), i = cursor[screen];
+    // A layout may render only a window of the list (mondrian pages); ask first.
+    if (!rendering && L.needsRerender && L.needsRerender(i, { papers: rows(), size: measure(c) })) return render();
+    for (const node of c.querySelectorAll("[data-i]")) node.classList.toggle("cursor", Number(node.dataset.i) === i);
+    const on = c.querySelector('[data-i="' + i + '"]');
+    c.dataset.cursor = String(i);
+    if (on && layoutName !== "mondrian") on.scrollIntoView({ block: "nearest", inline: "nearest" });
+    if (L.paint) L.paint(c, i, on);
   }
 
   function show(name) {
     screen = name;
     $("main").classList.toggle("on", name === "main");
     $("history").classList.toggle("on", name === "history");
+    MONDRIAN.cache = null;                       // the other screen is a different composition
     render();
   }
 
@@ -326,6 +754,68 @@
     if (!list.length) return;
     cursor[screen] = Math.max(0, Math.min(list.length - 1, cursor[screen] + delta));
     paint();
+  }
+
+  function setLayout(name) {
+    layoutName = LAYOUTS[name] ? name : "mondrian";
+    document.documentElement.dataset.layout = layoutName;
+    try { localStorage.setItem(LAYOUT_KEY, layoutName); } catch {}
+    MONDRIAN.cache = null;
+    render();
+  }
+  function cycleLayout(step) {
+    const i = LAYOUT_ORDER.indexOf(layoutName);
+    setLayout(LAYOUT_ORDER[(i + step + LAYOUT_ORDER.length) % LAYOUT_ORDER.length]);
+  }
+  function setTheme(name) {
+    themeName = THEME_ORDER.includes(name) ? name : "destijl";
+    document.documentElement.dataset.theme = themeName;
+    try { localStorage.setItem(THEME_KEY, themeName); } catch {}
+    const ground = getComputedStyle(document.documentElement).getPropertyValue("--ground").trim();
+    $("themeColor").setAttribute("content", ground || "#fcfbf7");
+    renderFooter();
+  }
+  function cycleTheme(step) {
+    const i = THEME_ORDER.indexOf(themeName);
+    setTheme(THEME_ORDER[(i + step + THEME_ORDER.length) % THEME_ORDER.length]);
+  }
+
+  // ---- footer (the key labels double as the readout) ----------------------
+  const BINDINGS = {
+    main: [
+      ["p", "Pop top", () => read("top"), "Pop"],
+      ["b", "Take bottom", () => read("bottom"), "Bottom"],
+      ["o", "Open (keep)", () => openHighlighted(false), "Open"],
+      ["O", "Open page", () => openHighlighted(true), "Page"],
+      ["d", "Delete", () => del(), "Del"],
+      ["a", "Add", () => $("link").focus(), "Add"],
+      ["h", "History", () => show("history"), "Hist"],
+    ],
+    history: [
+      ["r", "Re-add to stack", () => restore(), "Re-add"],
+      ["o", "Open PDF", () => openHighlighted(false), "Open"],
+      ["x", "Forget", () => forget(), "Forget"],
+      ["esc", "Back", () => show("main"), "Back"],
+    ],
+  };
+  const CHROME = [
+    ["v", () => (COARSE.matches ? "▦ " : "layout: ") + LAYOUTS[layoutName].label, () => cycleLayout(1)],
+    ["t", () => (COARSE.matches ? "◐ " : "palette: ") + themeName, () => cycleTheme(1)],
+  ];
+
+  function renderFooter() {
+    const f = $("footer");
+    f.replaceChildren();
+    const mk = ([key, label, action, short], cls) => {
+      const b = el("button", cls);
+      const text = COARSE.matches && short ? short : (typeof label === "function" ? label() : label);
+      b.append(el("kbd", null, key), document.createTextNode(text));
+      b.addEventListener("click", action);
+      return b;
+    };
+    for (const bnd of BINDINGS[screen]) f.appendChild(mk(bnd));
+    f.appendChild(el("span", "spacer"));
+    for (const bnd of CHROME) f.appendChild(mk(bnd, "chrome"));
   }
 
   // ---- actions ------------------------------------------------------------
@@ -345,7 +835,7 @@
       if (data && data.state) apply(data.state);
       if (status === 409) toast("Already on the stack", true);
       else if (status === 400) toast((data && data.error) || "Not a link", true);
-      else { toast("Added"); $("link").value = ""; $("link").focus(); }  // keep typing, like the TUI Input
+      else { toast("Added"); $("link").value = ""; $("link").focus(); }
     } catch (e) { toast(e.message, true); }
   }
   // Open the tab synchronously (popup blockers), then point it at the PDF once the server answers.
@@ -381,11 +871,24 @@
     mutate("DELETE", "/api/history?url=" + encodeURIComponent(p.url), null, "Forgotten: " + p.title);
   }
 
+  // ---- input: one delegated pair of listeners, not two per row ------------
+  function hostClick(e) {
+    const node = e.target.closest("[data-i]");
+    if (!node) return;
+    const i = Number(node.dataset.i);
+    if (i === cursor[screen] && COARSE.matches) return openHighlighted(false);  // tap again opens
+    cursor[screen] = i;
+    paint();
+  }
+  for (const h of [$("mainHost"), $("historyHost")]) {
+    h.addEventListener("click", hostClick);
+    h.addEventListener("dblclick", (e) => { if (e.target.closest("[data-i]")) openHighlighted(false); });
+  }
+
   // ---- keyboard (mirrors the TUI bindings) --------------------------------
   document.addEventListener("keydown", (e) => {
     if ($("tokenDialog").open) return;
-    const typing = document.activeElement === $("link");
-    if (typing) {
+    if (document.activeElement === $("link")) {
       if (e.key === "Enter") { e.preventDefault(); add($("link").value); }
       else if (e.key === "Escape") { e.preventDefault(); $("link").blur(); }
       return;
@@ -396,6 +899,10 @@
     if (k === "ArrowUp" || k === "k") { e.preventDefault(); return move(-1); }
     if (k === "Home") { e.preventDefault(); cursor[screen] = 0; return paint(); }
     if (k === "End") { e.preventDefault(); cursor[screen] = Math.max(0, rows().length - 1); return paint(); }
+    if (k === "v") { e.preventDefault(); return cycleLayout(1); }
+    if (k === "V") { e.preventDefault(); return cycleLayout(-1); }
+    if (k === "t") { e.preventDefault(); return cycleTheme(1); }
+    if (k === "T") { e.preventDefault(); return cycleTheme(-1); }
     if (screen === "history") {
       if (k === "r" || k === "Enter") { e.preventDefault(); return restore(); }
       if (k === "o") { e.preventDefault(); return openHighlighted(false); }
@@ -428,6 +935,20 @@
   // ---- wiring -------------------------------------------------------------
   document.addEventListener("visibilitychange", () => { if (!document.hidden) refresh(); });
   window.addEventListener("focus", refresh);
+  matchMedia("(prefers-color-scheme: dark)").addEventListener("change", () => {
+    if (themeName === "system") setTheme("system");           // refresh the statusbar colour
+  });
+
+  // Only mondrian and nonogram care about pixels; bucket so a keyboard opening
+  // or a slow window drag cannot thrash.
+  let sizeBucket = "";
+  new ResizeObserver(() => {
+    const s = measure(host());
+    const b = Math.round(s.w / 40) + "x" + Math.round(s.h / 40);
+    if (b === sizeBucket) return;
+    sizeBucket = b;
+    if (LAYOUTS[layoutName].pixelSensitive) render();
+  }).observe(document.body);
 
   // Share target / deep link: /?url=... or /?text=... (Android share sheet puts the link in text).
   const params = new URLSearchParams(location.search);
@@ -436,7 +957,13 @@
 
   if ("serviceWorker" in navigator) navigator.serviceWorker.register("/sw.js").catch(() => {});
 
-  render();
+  try {
+    layoutName = LAYOUTS[localStorage.getItem(LAYOUT_KEY)] ? localStorage.getItem(LAYOUT_KEY) : "mondrian";
+    themeName = THEME_ORDER.includes(localStorage.getItem(THEME_KEY)) ? localStorage.getItem(THEME_KEY) : "destijl";
+  } catch {}
+  setTheme(themeName);
+  setLayout(layoutName);
+
   if (!token) { setSub("no token"); askToken(); }
   else refresh().then(async () => { startPolling(); if (shared) { $("link").value = shared; await add(shared); } });
 })();
