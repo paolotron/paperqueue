@@ -1,5 +1,5 @@
-import { describe, expect, it } from "vitest";
-import { normalize, openreviewPdf, parseArxivEntries, parsePage, scholarInboxSlugWords } from "../src/links";
+import { afterEach, describe, expect, it, vi } from "vitest";
+import { normalize, openreviewPdf, parseArxivEntries, parsePage, resolve, scholarInboxSlugWords } from "../src/links";
 
 const ABS = "https://arxiv.org/abs/1706.03762";
 
@@ -106,5 +106,37 @@ describe("site rules", () => {
     expect(openreviewPdf("https://openreview.net/forum?noteId=1&id=abc-D_9")).toBe("https://openreview.net/pdf?id=abc-D_9");
     expect(openreviewPdf("https://openreview.net/group?id=ICLR")).toBeNull();
     expect(openreviewPdf("https://example.com/forum?id=x")).toBeNull();
+  });
+});
+
+const ABS_PAGE = `<html><head><title>[2609.12552] RelateAnything: Real-Time Open-Vocabulary Relation Prediction From Any Inputs</title>
+<meta name="citation_title" content="RelateAnything: Real-Time Open-Vocabulary Relation Prediction From Any Inputs"></head><body></body></html>`;
+
+describe("resolve with the arXiv API down", () => {
+  function stubFetch(handler: (url: string) => Response | Promise<Response>) {
+    vi.stubGlobal("fetch", (input: RequestInfo | URL) => Promise.resolve(handler(String(input))));
+  }
+  afterEach(() => vi.unstubAllGlobals());
+
+  it("keeps the PDF and falls back to the abs page title on 429", async () => {
+    stubFetch((url) =>
+      url.includes("export.arxiv.org") ? new Response("throttled", { status: 429 }) : new Response(ABS_PAGE),
+    );
+    expect(await resolve("https://arxiv.org/abs/2609.12552", "2609.12552")).toEqual({
+      title: "RelateAnything: Real-Time Open-Vocabulary Relation Prediction From Any Inputs",
+      pdf_url: "https://arxiv.org/pdf/2609.12552",
+      arxiv_id: "2609.12552",
+    });
+  });
+
+  it("keeps the PDF when every fetch fails", async () => {
+    stubFetch(() => {
+      throw new Error("network down");
+    });
+    expect(await resolve("https://arxiv.org/abs/2609.12552", "2609.12552")).toEqual({
+      title: null,
+      pdf_url: "https://arxiv.org/pdf/2609.12552",
+      arxiv_id: "2609.12552",
+    });
   });
 });

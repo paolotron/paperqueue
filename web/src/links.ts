@@ -122,6 +122,22 @@ async function arxivLookup(id: string): Promise<string | null> {
   return entries.length ? entries[0][1] : null;
 }
 
+/** Title for an arXiv id: the API first, then the abs page when the API is throttled or down. Never throws. */
+export async function arxivTitle(id: string): Promise<string | null> {
+  try {
+    const title = await arxivLookup(id);
+    if (title) return title;
+  } catch {
+    // export.arxiv.org rate-limits shared egress IPs (HTTP 429); the abs page carries citation_title too.
+  }
+  try {
+    const page = await parsePage(await get(arxivAbs(id)), arxivAbs(id));
+    return page.title && !looksGeneric(page.title) ? page.title : null;
+  } catch {
+    return null;
+  }
+}
+
 /** Find an arXiv paper whose title contains every word, in order. Phrase first, then AND of content words. */
 export async function arxivSearchTitle(words: string[]): Promise<[string, string] | null> {
   words = words.filter(Boolean);
@@ -308,8 +324,8 @@ export async function resolve(url: string, arxivId: string | null = null): Promi
   let res: Resolved = { title: null, pdf_url: null, arxiv_id: arxivId };
   try {
     if (arxivId) {
-      res.title = await arxivLookup(arxivId);
-      res.pdf_url = arxivPdf(arxivId);
+      res.pdf_url = arxivPdf(arxivId); // deterministic: set before any network call can fail
+      res.title = await arxivTitle(arxivId);
       return res;
     }
 
@@ -325,7 +341,7 @@ export async function resolve(url: string, arxivId: string | null = null): Promi
     const page = await parsePage(await get(url), url);
     res = { title: page.title, pdf_url: page.pdf_url ?? res.pdf_url, arxiv_id: page.arxiv_id };
     if (res.arxiv_id && (!res.title || looksGeneric(res.title))) {
-      res.title = (await arxivLookup(res.arxiv_id)) ?? res.title;
+      res.title = (await arxivTitle(res.arxiv_id)) ?? res.title;
     }
     return res;
   } catch {

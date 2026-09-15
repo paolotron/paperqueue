@@ -118,3 +118,34 @@ def test_scholar_inbox_slug():
 
 def test_parse_arxiv_entries_ids():
     assert parse_arxiv_entries(ATOM) == [("1706.03762", "Attention Is All You Need")]
+
+
+ABS_PAGE = b"""<html><head><title>[2609.12552] RelateAnything: Real-Time Open-Vocabulary Relation Prediction From Any Inputs</title>
+<meta name="citation_title" content="RelateAnything: Real-Time Open-Vocabulary Relation Prediction From Any Inputs"></head><body></body></html>"""
+
+
+def test_resolve_arxiv_api_down_keeps_pdf_and_uses_abs_page(monkeypatch):
+    from paperqueue import links
+
+    def fake_get(url):
+        if "export.arxiv.org" in url:
+            raise OSError("HTTP 429")
+        return ABS_PAGE
+
+    monkeypatch.setattr(links, "_get", fake_get)
+    res = links.resolve("https://arxiv.org/abs/2609.12552", "2609.12552")
+    assert res.pdf_url == "https://arxiv.org/pdf/2609.12552"
+    assert res.title == "RelateAnything: Real-Time Open-Vocabulary Relation Prediction From Any Inputs"
+    assert res.arxiv_id == "2609.12552"
+
+
+def test_resolve_arxiv_all_network_down_keeps_pdf(monkeypatch):
+    from paperqueue import links
+
+    def fake_get(url):
+        raise OSError("down")
+
+    monkeypatch.setattr(links, "_get", fake_get)
+    res = links.resolve("https://arxiv.org/abs/2609.12552", "2609.12552")
+    assert res.pdf_url == "https://arxiv.org/pdf/2609.12552"
+    assert res.title is None

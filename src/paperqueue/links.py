@@ -116,6 +116,21 @@ def arxiv_lookup(arxiv_id: str) -> str | None:
     return parse_arxiv_title(_get(f"https://export.arxiv.org/api/query?id_list={arxiv_id}"))
 
 
+def arxiv_title(arxiv_id: str) -> str | None:
+    """Title for an arXiv id: the API first, then the abs page when the API is throttled or down. Never raises."""
+    try:
+        title = arxiv_lookup(arxiv_id)
+        if title:
+            return title
+    except Exception:
+        pass  # export.arxiv.org rate-limits (HTTP 429); the abs page carries citation_title too.
+    try:
+        title = parse_page(_get(arxiv_abs(arxiv_id)), arxiv_abs(arxiv_id)).title
+        return title if title and not _looks_generic(title) else None
+    except Exception:
+        return None
+
+
 def _title_words(text: str) -> list[str]:
     return [w.lower() for w in re.findall(r"[A-Za-z0-9]+", text)]
 
@@ -274,8 +289,8 @@ def resolve(url: str, arxiv_id: str | None = None) -> Resolved:
     res = Resolved(arxiv_id=arxiv_id)
     try:
         if arxiv_id:
-            res.title = arxiv_lookup(arxiv_id)
-            res.pdf_url = arxiv_pdf(arxiv_id)
+            res.pdf_url = arxiv_pdf(arxiv_id)  # deterministic: set before any network call can fail
+            res.title = arxiv_title(arxiv_id)
             return res
 
         words = scholar_inbox_slug_words(url)
@@ -293,7 +308,7 @@ def resolve(url: str, arxiv_id: str | None = None) -> Resolved:
         page = parse_page(_get(url), url)
         res = Resolved(page.title, page.pdf_url or res.pdf_url, page.arxiv_id)
         if res.arxiv_id and (not res.title or _looks_generic(res.title)):
-            res.title = arxiv_lookup(res.arxiv_id) or res.title
+            res.title = arxiv_title(res.arxiv_id) or res.title
         return res
     except Exception:
         return res
