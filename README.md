@@ -20,8 +20,13 @@ uv tool install .          # or install the `paperqueue` command globally
 | `d` | delete the highlighted paper |
 | `a` / `Esc` | focus the input / the list |
 | `h` | history of read papers: `r`/`Enter` re-adds one to the top of the stack, `o` opens it, `x` forgets it, `Esc` goes back |
-| `t` | cycle the De Stijl palettes (remembered in `~/.config/paperqueue/ui.toml`) |
+| `t` | cycle the palettes (remembered in `~/.config/paperqueue/ui.toml`) |
 | `q` | quit |
+
+Besides the three De Stijl palettes, `t` reaches `dinn`: strictly two colours, ink on bone, with
+every tone between them dithered through a 4x4 Bayer matrix the way *Return of the Obra Dinn* does
+it. Under `dinn` a half-block band sits above the stack, one dithered step per paper and solid ink
+at the top, so the texture is the depth of the pile.
 
 Reading opens the PDF when one can be found: arXiv links, pages with a PDF link or `citation_pdf_url`,
 Scholar Inbox links (resolved to arXiv by title) and OpenReview forum links. Titles and PDFs are fetched in the background.
@@ -66,8 +71,10 @@ exposes a small JSON API and resolves titles/PDFs itself. One secret token prote
   | `picross` | nonogram rows on graph paper; the margin numbers are the real run-lengths of each row's cells, which encode age, PDF, arXiv id |
   | `table` | the plain table: `#`, title, PDF, added |
 
-  `t` cycles the palette: `destijl` (white, black rules, primaries), `graph` (ruled paper), `dark`, `system`.
-  Both choices are remembered per device. Quick-add from any desktop browser with a bookmarklet:
+  `t` cycles the palette: `destijl` (white, black rules, primaries), `graph` (ruled paper),
+  `dinn` (1-bit ink on bone, every tone a Bayer tile: mondrian blocks take five dither densities
+  instead of pigments, picross cells stipple, and the token dialog veils the page with a hatch),
+  `dark`, `system`. Both choices are remembered per device. Quick-add from any desktop browser with a bookmarklet:
 
   ```
   javascript:location.href='https://paperqueue.<subdomain>.workers.dev/?url='+encodeURIComponent(location.href)

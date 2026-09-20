@@ -24,6 +24,14 @@
     --p-red:#d42a1e; --p-blue:#0a3ea8; --p-yellow:#f3c000; --p-ink:#111214; --p-paper:#fcfbf7;
     --d-red:#f0574a; --d-blue:#5a86e8; --d-yellow:#f2cc4a; --d-ink:#f1efe8; --d-paper:#0e0f11; --d-panel:#17181b;
     --g-paper:#faf8f2; --g-grid:#b9c7d6;
+    /* 1-bit: ink on bone, and the Bayer tiles that stand in for every tone
+       between them. --n-dN lights the N of 16 matrix cells below the threshold. */
+    --n-ink:#101619; --n-paper:#e8e4d6; --n-panel:#efece1;
+    --n-d1: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 4 4' shape-rendering='crispEdges'%3E%3Cpath fill='%23101619' d='M0,0h1v1H0z'/%3E%3C/svg%3E");
+    --n-d2: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 4 4' shape-rendering='crispEdges'%3E%3Cpath fill='%23101619' d='M0,0h1v1H0zM2,2h1v1H2z'/%3E%3C/svg%3E");
+    --n-d4: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 4 4' shape-rendering='crispEdges'%3E%3Cpath fill='%23101619' d='M0,0h1v1H0zM2,0h1v1H2zM0,2h1v1H0zM2,2h1v1H2z'/%3E%3C/svg%3E");
+    --n-d8: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 4 4' shape-rendering='crispEdges'%3E%3Cpath fill='%23101619' d='M0,0h1v1H0zM2,0h1v1H2zM1,1h1v1H1zM3,1h1v1H3zM0,2h1v1H0zM2,2h1v1H2zM1,3h1v1H1zM3,3h1v1H3z'/%3E%3C/svg%3E");
+    --n-d12: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 4 4' shape-rendering='crispEdges'%3E%3Cpath fill='%23101619' d='M0,0h1v1H0zM1,0h1v1H1zM2,0h1v1H2zM3,0h1v1H3zM1,1h1v1H1zM3,1h1v1H3zM0,2h1v1H0zM1,2h1v1H1zM2,2h1v1H2zM3,2h1v1H3zM1,3h1v1H1zM3,3h1v1H3z'/%3E%3C/svg%3E");
 
     --a-ground: var(--p-paper); --a-panel: var(--p-paper); --a-ink: var(--p-ink);
     --a-red: var(--p-red); --a-blue: var(--p-blue); --a-yellow: var(--p-yellow);
@@ -44,6 +52,9 @@
     --fill-ink: var(--a-ink); --on-fill: var(--a-ground);
     --cursor-bg: var(--a-yellow); --cursor-fg: var(--a-ink);
     --accent: var(--a-blue); --key: var(--a-red); --danger: var(--a-red);
+    /* the two scales the 1-bit palette tiles its Bayer matrix at: a fine one to
+       stipple a small field, a coarse one where the pattern itself should read */
+    --wash-size: 4px; --tile-size: 8px;
     --cell: 20px;
     --sans: ui-sans-serif, "Helvetica Neue", Helvetica, Arial, sans-serif;
     --mono: ui-monospace, "Fira Code", "JetBrains Mono", "SF Mono", Menlo, Consolas, monospace;
@@ -54,6 +65,11 @@
   [data-theme="graph"] {
     --a-ground: var(--g-paper); --a-panel: var(--g-paper); --a-grid: var(--g-grid);
     --rule-w: 2px; --rule-heavy: 4px;
+  }
+  [data-theme="dinn"] {
+    --a-ground: var(--n-paper); --a-panel: var(--n-panel); --a-ink: var(--n-ink);
+    --a-red: var(--n-ink); --a-blue: var(--n-ink); --a-yellow: var(--n-ink);
+    --rule-w: 2px; --rule-heavy: 5px;
   }
   [data-theme="dark"] {
     --a-ground: var(--d-paper); --a-panel: var(--d-panel); --a-ink: var(--d-ink);
@@ -245,6 +261,50 @@
   }
   #toast.show { opacity: 1; }
   #toast.err { border-left-color: var(--danger); }
+
+  /* ============================================== palette: 1-bit dither ==
+     Obra Dinn's trick: two colours, and every tone between them faked by a 4x4
+     Bayer tile: the ramp runs paper, 1/16, 2/16, 4/16, solid ink. */
+  [data-theme="dinn"] {
+    --muted: var(--a-ink);          /* one ink only: hierarchy is size, not tone */
+    --cursor-bg: var(--a-ink); --cursor-fg: var(--a-ground);
+  }
+  [data-theme="dinn"] #sub { text-transform: uppercase; letter-spacing: .06em; font-size: 11px; }
+  [data-theme="dinn"] #link:focus { outline-width: var(--rule-heavy); }
+  [data-theme="dinn"] #header { position: relative; }
+  [data-theme="dinn"] #header .mark { background: var(--panel) var(--n-d8); background-size: var(--tile-size); }
+  /* one hatched band under the wordmark, so the palette shows in every layout */
+  [data-theme="dinn"] #header::after {
+    content: ""; position: absolute; left: 0; right: 0; bottom: 0; height: 8px;
+    background: var(--n-d8); background-size: var(--tile-size);
+  }
+  /* Tone goes on fields, never behind type: dots in a line of text read as dirt.
+     The zebra takes the palette's second paper instead. */
+  [data-theme="dinn"] [data-layout="skin"] tbody tr:nth-child(even):not(.cursor) { background: var(--panel); }
+  [data-theme="dinn"] [data-layout="nonogram"] .cell:not(.on) {
+    background: var(--panel) var(--n-d1); background-size: var(--wash-size);
+  }
+  [data-theme="dinn"] [data-layout="nonogram"]::after {
+    background: var(--n-d2); background-size: var(--wash-size);   /* the crosshair, hatched */
+  }
+  /* mondrian: the pigment gives way to the tone, so every block sits on the ramp */
+  [data-theme="dinn"] .block[data-tone] {
+    background: var(--panel); background-size: var(--tile-size); color: var(--fg);
+  }
+  [data-theme="dinn"] .block[data-tone="1"] { background-image: var(--n-d1); }
+  [data-theme="dinn"] .block[data-tone="2"] { background-image: var(--n-d2); }
+  [data-theme="dinn"] .block[data-tone="3"] { background-image: var(--n-d4); }
+  [data-theme="dinn"] .block[data-tone="4"] { background: var(--fill-ink); color: var(--on-fill); }
+  /* over a dithered field the type gets a knocked-out plate, the way the game
+     prints its labels over a dithered scene */
+  [data-theme="dinn"] .block[data-tone="1"] > *,
+  [data-theme="dinn"] .block[data-tone="2"] > *,
+  [data-theme="dinn"] .block[data-tone="3"] > * {
+    background: var(--panel); width: fit-content; max-width: 100%; padding: 0 3px; opacity: 1;
+  }
+  [data-theme="dinn"] dialog::backdrop {   /* a hatched veil rather than a translucent one */
+    background-color: transparent; background-image: var(--n-d12); background-size: var(--tile-size);
+  }
 
   /* ==================================================== small / touch == */
   @media (max-width: 620px) {
@@ -531,6 +591,13 @@
     if (h % 100 < TILE.colorRate) return ["red", "blue", "yellow"][(h >>> 8) % 3];
     return "";
   }
+  /** The 1-bit palette's five steps, deterministic per URL exactly as the pigment
+   *  is: paper, three dither densities, solid ink. Weighted so a composition is
+   *  mostly light with a few anchors, and read from other bits than fillFor. */
+  function toneFor(p) {
+    const h = (hash32(p.url) >>> 12) % 20;
+    return h < 6 ? 0 : h < 11 ? 1 : h < 15 ? 2 : h < 18 ? 3 : 4;
+  }
   const MONDRIAN = { cache: null };
 
   // ---- nonogram encoding --------------------------------------------------
@@ -659,6 +726,7 @@
           d.dataset.i = b.i;
           const fill = fillFor(p);
           if (fill) { d.dataset.fill = fill; anyColour = true; }
+          d.dataset.tone = String(toneFor(p));
           d.style.cssText = `left:${pct(b.x)};top:${pct(b.y)};width:${pct(b.w)};height:${pct(b.h)}`;
           const wPx = b.w * size.w, hPx = b.h * size.h;
           const fs = Math.max(11, Math.min(22, Math.round(Math.min(wPx * 0.028 + 9, hPx * 0.4))));
@@ -695,7 +763,7 @@
     },
   };
   const LAYOUT_ORDER = ["mondrian", "clues", "nonogram", "skin"];
-  const THEME_ORDER = ["destijl", "graph", "dark", "system"];
+  const THEME_ORDER = ["destijl", "graph", "dinn", "dark", "system"];
 
   // ---- render / paint -----------------------------------------------------
   // The active layout's status (mondrian's "page 2/3") is sticky: refresh() rewrites

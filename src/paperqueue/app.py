@@ -20,7 +20,7 @@ from paperqueue.store import Paper, Stack
 
 POLL_SECONDS = 5
 
-# The same De Stijl palette the web client uses, so both ports look like one app.
+# The same palettes the web client offers, so both ports look like one app.
 THEMES = [
     Theme(
         name="destijl",
@@ -59,8 +59,72 @@ THEMES = [
             "border": "#f1efe8", "border-blurred": "#5b5d61",
         },
     ),
+    Theme(
+        name="dinn",
+        # Strictly two colours: ink and bone. Every tone in between is dithered.
+        primary="#101619", secondary="#101619", accent="#101619",
+        warning="#101619", error="#101619", success="#101619",
+        background="#e8e4d6", surface="#e8e4d6", panel="#efece1", foreground="#101619",
+        dark=False,
+        variables={
+            "block-cursor-background": "#101619", "block-cursor-foreground": "#e8e4d6",
+            "block-cursor-text-style": "bold", "footer-key-foreground": "#101619",
+            "border": "#101619", "border-blurred": "#101619",
+            "input-cursor-background": "#101619", "input-cursor-foreground": "#e8e4d6",
+            # Textual blends greys for these by default; a 1-bit palette has none.
+            "text-muted": "#101619",
+            "scrollbar": "#101619", "scrollbar-hover": "#101619", "scrollbar-active": "#101619",
+            "scrollbar-background": "#efece1", "scrollbar-background-hover": "#efece1",
+            "scrollbar-background-active": "#efece1", "scrollbar-corner-color": "#e8e4d6",
+        },
+    ),
 ]
 THEME_NAMES = [t.name for t in THEMES]
+
+# Ordered dithering, the Obra Dinn way: a 4x4 Bayer matrix decides which of the two
+# colours each pixel takes. Half-blocks split a cell vertically, so two terminal
+# rows carry the four pixel rows of one tile.
+BAYER4 = ((0, 8, 2, 10), (12, 4, 14, 6), (3, 11, 1, 9), (15, 7, 13, 5))
+HALF_BLOCKS = {(0, 0): " ", (1, 0): "▀", (0, 1): "▄", (1, 1): "█"}
+
+
+class DitherBand(Static):
+    """The stack as a 1-bit tone ramp: one dithered step per paper, solid ink on top.
+
+    Only the `dinn` palette has half-tones to show; under the flat De Stijl
+    palettes the band hides itself.
+    """
+
+    ROWS = 2
+
+    def __init__(self) -> None:
+        super().__init__(id="dither")
+        self.depth = 0
+
+    def paint(self, depth: int | None = None) -> None:
+        if depth is not None:
+            self.depth = depth
+        self.display = self.app.theme == "dinn"
+        width = self.size.width
+        if not self.display:
+            return
+        if width <= 0 or self.depth <= 0:
+            self.update("")
+            return
+        lines = []
+        for row in range(self.ROWS):
+            cells = []
+            for x in range(width):
+                # Each paper owns a slice of the band, darkest at the top of the stack;
+                # the steps are countable, so the texture is the stack's depth.
+                tone = 1.0 - (x * self.depth // width) / self.depth
+                top, bottom = (BAYER4[row * 2 + p][x % 4] < tone * 16 for p in (0, 1))
+                cells.append(HALF_BLOCKS[(int(top), int(bottom))])
+            lines.append("".join(cells))
+        self.update("\n".join(lines))
+
+    def on_resize(self) -> None:
+        self.paint()
 
 
 def _fmt_added(iso: str) -> str:
@@ -174,6 +238,7 @@ class PaperQueue(App[None]):
     def compose(self) -> ComposeResult:
         yield Header()
         yield Input(placeholder="Paste a paper link and press Enter", id="link")
+        yield DitherBand()
         yield DataTable(id="stack", cursor_type="row", zebra_stripes=True)
         yield Static("Stack is empty. Paste a link above.", id="empty")
         yield Footer()
@@ -227,6 +292,7 @@ class PaperQueue(App[None]):
         empty.display = not papers
         if papers:
             table.move_cursor(row=min(cursor, len(papers) - 1))
+        main.query_one(DitherBand).paint(len(papers))
         mode = "synced" if self.stack.remote else "local"
         self.sub_title = f"{len(papers)} paper{'s' if len(papers) != 1 else ''} · {self._problem or mode}"
 
@@ -328,10 +394,11 @@ class PaperQueue(App[None]):
         self.notify(f"Removed: {paper.title}")
 
     def action_cycle_theme(self) -> None:
-        """Cycle the De Stijl palettes, mirroring `t` in the web client."""
+        """Cycle the palettes, mirroring `t` in the web client."""
         i = THEME_NAMES.index(self.theme) if self.theme in THEME_NAMES else -1
         self.theme = THEME_NAMES[(i + 1) % len(THEME_NAMES)]
         save_theme(self.theme)
+        self.screen_stack[0].query_one(DitherBand).paint()
         self.notify(f"theme: {self.theme}")
 
     def action_focus_input(self) -> None:
