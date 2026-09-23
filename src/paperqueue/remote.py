@@ -90,11 +90,17 @@ class RemoteStack:
         status, _ = self._mutate("POST", "/api/papers", {"url": paper.url})
         return status != 409
 
-    def pop(self) -> Paper | None:
-        return self._mutate("POST", "/api/pop")[1]
+    def pop(self, comment: str, usefulness: float, expected_url: str | None = None) -> Paper | None:
+        body: dict[str, Any] = {"comment": comment, "usefulness": usefulness}
+        if expected_url is not None:
+            body["url"] = expected_url
+        return self._mutate("POST", "/api/pop", body)[1]
 
-    def take_bottom(self) -> Paper | None:
-        return self._mutate("POST", "/api/take")[1]
+    def take_bottom(self, comment: str, usefulness: float, expected_url: str | None = None) -> Paper | None:
+        body: dict[str, Any] = {"comment": comment, "usefulness": usefulness}
+        if expected_url is not None:
+            body["url"] = expected_url
+        return self._mutate("POST", "/api/take", body)[1]
 
     def remove(self, url: str) -> Paper | None:
         return self._mutate("DELETE", f"/api/papers?url={quote(url, safe='')}")[1]

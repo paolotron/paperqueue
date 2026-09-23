@@ -23,7 +23,7 @@ class FakeServer:
         self.requests = []
 
     def paper(self, url):
-        return {"url": url, "title": url, "added_at": "2026-01-01T00:00:00+00:00", "arxiv_id": None, "pdf_url": None, "read_at": None}
+        return {"url": url, "title": url, "added_at": "2026-01-01T00:00:00+00:00", "arxiv_id": None, "pdf_url": None, "read_at": None, "review_comment": None, "usefulness": None}
 
     def bump(self):
         self.state["version"] += 1
@@ -42,8 +42,12 @@ class FakeServer:
         if method == "POST" and path in ("/api/pop", "/api/take"):
             if not papers:
                 return 404, {"paper": None, "state": self.state}
+            if not body["comment"].strip() or not 0 <= body["usefulness"] <= 5:
+                return 400, {"error": "invalid review"}
+            if body.get("url") and body["url"] != (papers[-1] if path == "/api/pop" else papers[0])["url"]:
+                return 404, {"paper": None, "state": self.state}
             p = papers.pop() if path == "/api/pop" else papers.pop(0)
-            p["read_at"] = "2026-01-02T00:00:00+00:00"; history.append(p); self.bump()
+            p["read_at"] = "2026-01-02T00:00:00+00:00"; p["review_comment"] = body["comment"].strip(); p["usefulness"] = body["usefulness"]; history.append(p); self.bump()
             return 200, {"paper": p, "state": self.state}
         if method == "DELETE" and path == "/api/papers":
             url = query["url"][0]
@@ -119,11 +123,12 @@ def test_remote_stack_round_trip(server):
     assert [p.url for p in rs.top_first()] == ["b", "a"]
     assert len(rs) == 2 and rs.find("a") is not None
 
-    assert rs.pop().url == "b"
-    assert rs.take_bottom().url == "a"
-    assert rs.pop() is None
+    assert rs.pop("Worth revisiting", 4.4).url == "b"
+    assert rs.take_bottom("Useful background", 2.3).url == "a"
+    assert rs.pop("Empty stack", 0) is None
     assert [p.url for p in rs.history_newest_first()] == ["a", "b"]
     assert rs.find_history("a") is not None
+    assert rs.find_history("a").usefulness == 2.3
 
     assert rs.restore("a").url == "a"
     assert [p.url for p in rs.top_first()] == ["a"]

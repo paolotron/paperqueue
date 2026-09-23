@@ -9,6 +9,8 @@ export interface Paper {
   arxiv_id: string | null;
   pdf_url: string | null;
   read_at: string | null;
+  review_comment: string | null;
+  usefulness: number | null;
 }
 
 /** Same shape as the TUI's stack.json: papers bottom->top, history oldest->newest. */
@@ -21,6 +23,11 @@ export interface State {
 export interface Mutation {
   paper: Paper | null;
   state: State;
+}
+
+export interface Review {
+  comment: string;
+  usefulness: number;
 }
 
 const MAX_HISTORY = 500;
@@ -40,6 +47,8 @@ function coerce(raw: Partial<Paper> & { url: string }): Paper {
     arxiv_id: raw.arxiv_id ?? null,
     pdf_url: raw.pdf_url ?? null,
     read_at: raw.read_at ?? null,
+    review_comment: typeof raw.review_comment === "string" && raw.review_comment.trim() ? raw.review_comment.trim() : null,
+    usefulness: typeof raw.usefulness === "number" && Number.isFinite(raw.usefulness) ? raw.usefulness : null,
   };
 }
 
@@ -66,8 +75,12 @@ export class PaperStack extends DurableObject<Env> {
     return next;
   }
 
-  private archive(state: State, paper: Paper): void {
+  private archive(state: State, paper: Paper, review?: Review): void {
     paper.read_at = now();
+    if (review) {
+      paper.review_comment = review.comment;
+      paper.usefulness = review.usefulness;
+    }
     state.history = state.history.filter((h) => h.url !== paper.url);
     state.history.push(paper);
     if (state.history.length > MAX_HISTORY) state.history.splice(0, state.history.length - MAX_HISTORY);
@@ -121,19 +134,21 @@ export class PaperStack extends DurableObject<Env> {
     return { ok: true, paper, state: next };
   }
 
-  async pop(): Promise<Mutation> {
+  async pop(review: Review, expectedUrl?: string): Promise<Mutation> {
     const state = await this.load();
+    if (expectedUrl && state.papers.at(-1)?.url !== expectedUrl) return { paper: null, state };
     const paper = state.papers.pop();
     if (!paper) return { paper: null, state };
-    this.archive(state, paper);
+    this.archive(state, paper, review);
     return { paper, state: await this.commit(state) };
   }
 
-  async takeBottom(): Promise<Mutation> {
+  async takeBottom(review: Review, expectedUrl?: string): Promise<Mutation> {
     const state = await this.load();
+    if (expectedUrl && state.papers[0]?.url !== expectedUrl) return { paper: null, state };
     const paper = state.papers.shift();
     if (!paper) return { paper: null, state };
-    this.archive(state, paper);
+    this.archive(state, paper, review);
     return { paper, state: await this.commit(state) };
   }
 
@@ -155,6 +170,8 @@ export class PaperStack extends DurableObject<Env> {
     if (!state.papers.some((p) => p.url === url)) {
       paper.read_at = null;
       paper.added_at = now();
+      paper.review_comment = null;
+      paper.usefulness = null;
       state.papers.push(paper);
     }
     return { paper, state: await this.commit(state) };

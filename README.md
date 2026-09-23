@@ -1,6 +1,7 @@
 # paperqueue
 
 A stack of papers to read. Paste a link, push it; pop from the top or take from the bottom to read it.
+Each reading finishes with a required comment and a continuous 0–5 usefulness rating, which are stored with the paper in history.
 Works as a terminal app and as a web page (installable on phones), with one queue synced across devices.
 
 ## Terminal app
@@ -106,7 +107,7 @@ All routes need `Authorization: Bearer <token>` and answer JSON. Mutations retur
 |---|---|
 | `GET /api/state` | `{version, papers, history}` (papers bottom→top, history oldest→newest) |
 | `POST /api/papers` `{url}` | normalize and push (409 if already queued) |
-| `POST /api/pop` / `POST /api/take` | remove the top / bottom paper into history (404 when empty) |
+| `POST /api/pop` / `POST /api/take` `{url?, comment, usefulness}` | complete a reading and move the top / bottom paper into history; `comment` is required and `usefulness` is a 0–5 number (404 when empty) |
 | `DELETE /api/papers?url=` | delete a paper into history |
 | `POST /api/history/restore` `{url}` / `DELETE /api/history?url=` | re-add / forget |
 | `POST /api/import` `{papers, history}` | merge a local `stack.json` |

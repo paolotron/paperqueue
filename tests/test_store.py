@@ -1,5 +1,7 @@
 from pathlib import Path
 
+import pytest
+
 from paperqueue.store import Paper, Stack
 
 
@@ -8,12 +10,12 @@ def test_pop_is_lifo_and_take_bottom_is_fifo():
     for u in ("a", "b", "c"):
         assert s.push(Paper(url=u))
     assert [p.url for p in s.top_first()] == ["c", "b", "a"]
-    assert s.pop().url == "c"
-    assert s.take_bottom().url == "a"
+    assert s.pop("Useful overview", 4.2).url == "c"
+    assert s.take_bottom("Too introductory", 1.5).url == "a"
     assert [p.url for p in s] == ["b"]
-    assert s.pop().url == "b"
-    assert s.pop() is None
-    assert s.take_bottom() is None
+    assert s.pop("Good references", 3).url == "b"
+    assert s.pop("Nothing to read", 0) is None
+    assert s.take_bottom("Nothing to read", 0) is None
 
 
 def test_duplicate_push_is_noop():
@@ -21,6 +23,21 @@ def test_duplicate_push_is_noop():
     assert s.push(Paper(url="x"))
     assert not s.push(Paper(url="x"))
     assert len(s) == 1
+
+
+def test_reading_requires_a_comment_and_a_continuous_0_to_5_score():
+    s = Stack()
+    s.push(Paper(url="x"))
+    with pytest.raises(ValueError, match="comment"):
+        s.pop("   ", 2.5)
+    with pytest.raises(ValueError, match="between 0 and 5"):
+        s.pop("Fine", 5.1)
+    assert s.find("x") is not None
+
+    paper = s.pop("A precise and useful contribution", 3.7)
+    assert paper is not None
+    assert paper.review_comment == "A precise and useful contribution"
+    assert paper.usefulness == 3.7
 
 
 def test_title_defaults_to_url_and_update():
@@ -73,8 +90,8 @@ def test_read_and_deleted_papers_go_to_history_and_can_be_restored(tmp_path: Pat
     s = Stack(path=path)
     for u in ("a", "b", "c"):
         s.push(Paper(url=u))
-    s.pop()            # c
-    s.take_bottom()    # a
+    s.pop("Review c", 4.5)            # c
+    s.take_bottom("Review a", 2.5)    # a
     s.remove("b")
     assert len(s) == 0
     assert [p.url for p in s.history_newest_first()] == ["b", "a", "c"]
@@ -86,12 +103,13 @@ def test_read_and_deleted_papers_go_to_history_and_can_be_restored(tmp_path: Pat
 
     restored = s.restore("a")
     assert restored is not None and restored.read_at is None
+    assert restored.review_comment is None and restored.usefulness is None
     assert [p.url for p in s.top_first()] == ["a"]
     assert [p.url for p in s.history_newest_first()] == ["b", "c"]
     assert s.restore("missing") is None
 
     # Reading it again replaces the old history entry rather than duplicating it.
-    s.pop()
+    s.pop("Updated review", 3.4)
     assert [p.url for p in s.history_newest_first()] == ["a", "b", "c"]
     assert s.forget("c").url == "c"
     assert [p.url for p in s.history_newest_first()] == ["a", "b"]
@@ -100,7 +118,7 @@ def test_read_and_deleted_papers_go_to_history_and_can_be_restored(tmp_path: Pat
 def test_restore_when_url_already_queued_just_drops_history():
     s = Stack()
     s.push(Paper(url="a"))
-    s.pop()
+    s.pop("Initial review", 2.0)
     s.push(Paper(url="a"))
     assert s.restore("a") is not None
     assert len(s) == 1 and s.history_newest_first() == []
@@ -111,5 +129,5 @@ def test_history_is_capped():
     s.MAX_HISTORY = 3
     for i in range(5):
         s.push(Paper(url=str(i)))
-        s.pop()
+        s.pop("A comment", 2.0)
     assert [p.url for p in s.history_newest_first()] == ["4", "3", "2"]

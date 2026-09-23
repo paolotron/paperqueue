@@ -28,6 +28,8 @@ class Paper:
     arxiv_id: str | None = None
     pdf_url: str | None = None
     read_at: str | None = None
+    review_comment: str | None = None
+    usefulness: float | None = None
 
     @property
     def read_url(self) -> str:
@@ -54,6 +56,8 @@ class Paper:
             arxiv_id=data.get("arxiv_id"),
             pdf_url=data.get("pdf_url"),
             read_at=data.get("read_at"),
+            review_comment=data.get("review_comment"),
+            usefulness=data.get("usefulness"),
         )
 
 
@@ -117,23 +121,41 @@ class Stack:
         self._papers.append(paper)
         return True
 
-    def _archive(self, paper: Paper | None) -> Paper | None:
+    @staticmethod
+    def _review(comment: str, usefulness: float) -> tuple[str, float]:
+        comment = comment.strip()
+        if not comment:
+            raise ValueError("a review comment is required")
+        usefulness = float(usefulness)
+        if not 0 <= usefulness <= 5:
+            raise ValueError("usefulness must be between 0 and 5")
+        return comment, usefulness
+
+    def _archive(self, paper: Paper | None, review: tuple[str, float] | None = None) -> Paper | None:
         """Move a paper that left the stack into history (newest last)."""
         if paper is None:
             return None
         paper.read_at = _now()
+        if review is not None:
+            paper.review_comment, paper.usefulness = review
         self._history = [h for h in self._history if h.url != paper.url]
         self._history.append(paper)
         del self._history[: -self.MAX_HISTORY]
         return paper
 
-    def pop(self) -> Paper | None:
-        """Remove and return the top (most recent) paper, recording it in history."""
-        return self._archive(self._papers.pop() if self._papers else None)
+    def pop(self, comment: str, usefulness: float, expected_url: str | None = None) -> Paper | None:
+        """Complete the top paper's required review and move it into history."""
+        review = self._review(comment, usefulness)
+        if expected_url is not None and (not self._papers or self._papers[-1].url != expected_url):
+            return None
+        return self._archive(self._papers.pop() if self._papers else None, review)
 
-    def take_bottom(self) -> Paper | None:
-        """Remove and return the bottom (oldest) paper, recording it in history."""
-        return self._archive(self._papers.pop(0) if self._papers else None)
+    def take_bottom(self, comment: str, usefulness: float, expected_url: str | None = None) -> Paper | None:
+        """Complete the bottom paper's required review and move it into history."""
+        review = self._review(comment, usefulness)
+        if expected_url is not None and (not self._papers or self._papers[0].url != expected_url):
+            return None
+        return self._archive(self._papers.pop(0) if self._papers else None, review)
 
     def remove(self, url: str) -> Paper | None:
         paper = self.find(url)
@@ -162,6 +184,8 @@ class Stack:
             return paper  # already queued again; just drop the history entry
         paper.read_at = None
         paper.added_at = _now()
+        paper.review_comment = None
+        paper.usefulness = None
         self._papers.append(paper)
         return paper
 

@@ -49,3 +49,57 @@ DataTable > .datatable--cursor {
     content-align: center middle;
     color: $text-muted;
 }
+
+ReviewScreen {
+    align: center middle;
+}
+
+#review-title, #review-comment, #review-usefulness, .review-hint, #review-save, ReviewScreen > Static {
+    margin-left: 4;
+    margin-right: 4;
+    width: 1fr;
+}
+
+#review-title {
+    margin-top: 2;
+    text-style: bold;
+}
+
+#review-comment {
+    height: 8;
+    border: heavy $foreground;
+}
+
+#review-usefulness {
+    margin-top: 1;
+    border: tall $foreground;
+    padding: 0 1;
+}
+
+.review-hint {
+    color: $text-muted;
+}
+
+#review-save {
+    margin-bottom: 2;
+}
+
+#review-details-title, #review-details-score, #review-details-comment, #review-details-close {
+    margin-left: 4;
+    margin-right: 4;
+    width: 1fr;
+}
+
+#review-details-title {
+    margin-top: 2;
+    text-style: bold;
+}
+
+#review-details-comment {
+    margin-top: 1;
+    margin-bottom: 1;
+}
+
+#review-details-close {
+    margin-bottom: 2;
+}

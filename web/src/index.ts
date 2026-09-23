@@ -37,6 +37,16 @@ function requireUrl(value: unknown): string {
   return value.trim();
 }
 
+function requireReview(body: Record<string, unknown>): { comment: string; usefulness: number } {
+  const comment = typeof body.comment === "string" ? body.comment.trim() : "";
+  if (!comment) throw new BadRequest("missing review comment");
+  const usefulness = body.usefulness;
+  if (typeof usefulness !== "number" || !Number.isFinite(usefulness) || usefulness < 0 || usefulness > 5) {
+    throw new BadRequest("usefulness must be between 0 and 5");
+  }
+  return { comment, usefulness };
+}
+
 class BadRequest extends Error {}
 
 async function api(request: Request, env: Env, stub: DurableObjectStub<PaperStack>): Promise<Response> {
@@ -60,11 +70,13 @@ async function api(request: Request, env: Env, stub: DurableObjectStub<PaperStac
   }
 
   if (method === "POST" && path === "/api/pop") {
-    const r = await stub.pop();
+    const body = await readJson(request);
+    const r = await stub.pop(requireReview(body), typeof body.url === "string" ? body.url : undefined);
     return json(r, r.paper ? 200 : 404);
   }
   if (method === "POST" && path === "/api/take") {
-    const r = await stub.takeBottom();
+    const body = await readJson(request);
+    const r = await stub.takeBottom(requireReview(body), typeof body.url === "string" ? body.url : undefined);
     return json(r, r.paper ? 200 : 404);
   }
   if (method === "DELETE" && path === "/api/papers") {

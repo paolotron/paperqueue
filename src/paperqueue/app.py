@@ -6,12 +6,13 @@ import argparse
 import sys
 from datetime import datetime
 
-from textual import work
+from textual import events, work
 from textual.app import App, ComposeResult
 from textual.binding import Binding
-from textual.screen import Screen
+from textual.reactive import reactive
+from textual.screen import ModalScreen, Screen
 from textual.theme import Theme
-from textual.widgets import DataTable, Footer, Header, Input, Static
+from textual.widgets import Button, DataTable, Footer, Header, Input, Static, TextArea
 
 from paperqueue import links, opener
 from paperqueue.config import load_server_config, load_theme, save_theme
@@ -134,10 +135,108 @@ def _fmt_added(iso: str) -> str:
         return iso
 
 
+def _fmt_usefulness(value: float | None) -> str:
+    return "—" if value is None else f"{value:g} / 5"
+
+
+class UsefulnessSlider(Static):
+    """A keyboard- and mouse-adjustable continuous 0–5 slider for the terminal UI."""
+
+    can_focus = True
+    value = reactive(2.5)
+    BINDINGS = [
+        Binding("left", "decrease", "Lower", show=False),
+        Binding("right", "increase", "Higher", show=False),
+        Binding("home", "minimum", "0", show=False),
+        Binding("end", "maximum", "5", show=False),
+    ]
+
+    def render(self) -> str:
+        length = 20
+        filled = round(self.value / 5 * length)
+        return f"Usefulness  [{'━' * filled}{'─' * (length - filled)}] {self.value:.1f} / 5"
+
+    def set_value(self, value: float) -> None:
+        self.value = round(max(0, min(5, value)) * 10) / 10
+
+    def action_decrease(self) -> None:
+        self.set_value(self.value - 0.1)
+
+    def action_increase(self) -> None:
+        self.set_value(self.value + 0.1)
+
+    def action_minimum(self) -> None:
+        self.set_value(0)
+
+    def action_maximum(self) -> None:
+        self.set_value(5)
+
+    def on_click(self, event: events.Click) -> None:
+        self.focus()
+        self.set_value(5 * event.x / max(1, self.size.width - 1))
+
+
+class ReviewScreen(ModalScreen[tuple[str, float]]):
+    """The required reflection that completes a paper reading."""
+
+    BINDINGS = [Binding("ctrl+enter", "submit", "Save review")]
+
+    def __init__(self, paper: Paper) -> None:
+        super().__init__()
+        self.paper = paper
+
+    def compose(self) -> ComposeResult:
+        yield Static(f"Review: {self.paper.title}", id="review-title")
+        yield Static("Comment (required)")
+        yield TextArea(placeholder="What did you take from it?", id="review-comment")
+        yield UsefulnessSlider(id="review-usefulness")
+        yield Static("Use ←/→ or click the slider. Ctrl+Enter saves the review.", classes="review-hint")
+        yield Button("Save review and mark as read", id="review-save", variant="primary")
+
+    def on_mount(self) -> None:
+        self.query_one(TextArea).focus()
+
+    def action_submit(self) -> None:
+        comment = self.query_one(TextArea).text.strip()
+        if not comment:
+            self.notify("A review comment is required", severity="error")
+            self.query_one(TextArea).focus()
+            return
+        self.dismiss((comment, self.query_one(UsefulnessSlider).value))
+
+    def on_button_pressed(self, event: Button.Pressed) -> None:
+        if event.button.id == "review-save":
+            self.action_submit()
+
+
+class ReviewDetailsScreen(ModalScreen[None]):
+    """Read-only view of a completed paper's review."""
+
+    BINDINGS = [Binding("escape,enter", "close", "Close")]
+
+    def __init__(self, paper: Paper) -> None:
+        super().__init__()
+        self.paper = paper
+
+    def compose(self) -> ComposeResult:
+        yield Static(f"Review: {self.paper.title}", id="review-details-title")
+        yield Static(f"Usefulness: {_fmt_usefulness(self.paper.usefulness)}", id="review-details-score")
+        yield Static(self.paper.review_comment or "No review was recorded.", id="review-details-comment")
+        yield Button("Close", id="review-details-close")
+
+    def action_close(self) -> None:
+        self.dismiss()
+
+    def on_button_pressed(self, event: Button.Pressed) -> None:
+        if event.button.id == "review-details-close":
+            self.action_close()
+
+
 class HistoryScreen(Screen[None]):
     """Papers already read (or deleted), newest first. Restore pushes one back on the stack."""
 
     BINDINGS = [
+        Binding("i", "review", "View review"),
         Binding("r,enter", "restore", "Re-add to stack"),
         Binding("o", "open", "Open PDF"),
         Binding("x", "forget", "Forget"),
@@ -158,6 +257,8 @@ class HistoryScreen(Screen[None]):
         self.sub_title = "history"
         table = self.query_one(DataTable)
         table.add_column("Title", key="title")
+        table.add_column("Review", key="review")
+        table.add_column("Score", key="score", width=7)
         table.add_column("Read", key="read", width=16)
         self.refresh_table()
         table.focus()
@@ -168,7 +269,13 @@ class HistoryScreen(Screen[None]):
         table.clear()
         papers = self.stack.history_newest_first()
         for paper in papers:
-            table.add_row(paper.title, _fmt_added(paper.read_at or ""), key=paper.url)
+            table.add_row(
+                paper.title,
+                paper.review_comment or "—",
+                _fmt_usefulness(paper.usefulness),
+                _fmt_added(paper.read_at or ""),
+                key=paper.url,
+            )
         table.display = bool(papers)
         self.query_one("#empty", Static).display = not papers
         if papers:
@@ -199,6 +306,11 @@ class HistoryScreen(Screen[None]):
         paper = self._highlighted()
         if paper is not None:
             opener.open_url(paper.read_url)
+
+    def action_review(self) -> None:
+        paper = self._highlighted()
+        if paper is not None:
+            self.app.push_screen(ReviewDetailsScreen(paper))
 
     def action_forget(self) -> None:
         paper = self._highlighted()
@@ -337,26 +449,35 @@ class PaperQueue(App[None]):
 
     # -- reading -----------------------------------------------------------
 
-    def _read(self, paper: Paper | None, where: str) -> None:
+    def _start_read(self, where: str) -> None:
+        paper = self.stack.top_first()[0] if where == "top" and len(self.stack) else next(iter(self.stack), None)
         if paper is None:
             self.notify("Stack is empty", severity="warning")
             return
+        opener.open_url(paper.read_url)
+        self.push_screen(ReviewScreen(paper), lambda review: self._complete_read(where, paper.url, review))
+
+    def _complete_read(self, where: str, expected_url: str, review: tuple[str, float] | None) -> None:
+        if review is None:
+            return
+        comment, usefulness = review
+        try:
+            paper = self.stack.pop(comment, usefulness, expected_url) if where == "top" else self.stack.take_bottom(comment, usefulness, expected_url)
+        except (RemoteError, ValueError) as exc:
+            self.notify(str(exc), severity="error")
+            return
+        if paper is None:
+            self.notify("That paper is no longer in this position", severity="warning")
+            return
         self.stack.save()
         self.refresh_table()
-        opener.open_url(paper.read_url)
-        self.notify(f"Reading from {where}: {paper.title}")
+        self.notify(f"Reviewed and read from {where}: {paper.title}")
 
     def action_pop_top(self) -> None:
-        try:
-            self._read(self.stack.pop(), "top")
-        except RemoteError as exc:
-            self.notify(str(exc), severity="error")
+        self._start_read("top")
 
     def action_take_bottom(self) -> None:
-        try:
-            self._read(self.stack.take_bottom(), "bottom")
-        except RemoteError as exc:
-            self.notify(str(exc), severity="error")
+        self._start_read("bottom")
 
     def _highlighted(self) -> Paper | None:
         table = self.query_one(DataTable)

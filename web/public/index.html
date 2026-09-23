@@ -159,6 +159,7 @@
   [data-layout="skin"] tr.cursor .c-idx { color: var(--cursor-fg); }
   .c-pdf { width: 4em; }
   .c-when, .c-read { width: 11.5em; }
+  .c-score { width: 6em; }
 
   /* ====================================================== layout: clues == */
   [data-layout="clues"] .clues { list-style: none; margin: 0; padding: 0; column-gap: 28px; }
@@ -252,6 +253,13 @@
   dialog button { width: 100%; font: 700 14px var(--sans); padding: 8px; cursor: pointer;
                   background: var(--blue); color: var(--on-fill); border: var(--rule-w) solid var(--rule); }
   dialog .hint { color: var(--muted); font-size: 12px; }
+  dialog textarea { width: 100%; min-height: 7em; resize: vertical; font: 14px/1.4 var(--sans); padding: 8px 10px;
+                    margin: 7px 0 12px; background: var(--ground); color: var(--fg); border: var(--rule-w) solid var(--rule); }
+  dialog textarea:focus, dialog input:focus { outline: var(--rule-w) solid var(--blue); outline-offset: 0; }
+  #reviewDialog label { display: block; font-weight: 700; }
+  #reviewDialog input[type="range"] { accent-color: var(--blue); padding: 0; margin: 8px 0 14px; }
+  #reviewValue { float: right; font: 14px var(--mono); font-weight: 400; }
+  #reviewViewComment { white-space: pre-wrap; overflow-wrap: anywhere; margin: 10px 0 14px; }
   #toast {
     position: fixed; right: 12px; bottom: calc(46px + env(safe-area-inset-bottom));
     background: var(--panel); color: var(--fg);
@@ -302,8 +310,10 @@
   [data-theme="dinn"] .block[data-tone="3"] > * {
     background: var(--panel); width: fit-content; max-width: 100%; padding: 0 3px; opacity: 1;
   }
-  [data-theme="dinn"] dialog::backdrop {   /* a hatched veil rather than a translucent one */
-    background-color: transparent; background-image: var(--n-d12); background-size: var(--tile-size);
+  [data-theme="dinn"] dialog::backdrop {
+    /* The old full-page Bayer hatch competed with forms, especially the review
+       fields. A plain ink scrim keeps the two-colour palette without noise. */
+    background: color-mix(in srgb, var(--n-ink) 78%, transparent);
   }
 
   /* ==================================================== small / touch == */
@@ -358,6 +368,25 @@
     <button type="submit">Save</button>
   </form>
 </dialog>
+<dialog id="reviewDialog">
+  <form id="reviewForm">
+    <strong>Review this paper</strong>
+    <div id="reviewTitle" class="hint"></div>
+    <label for="reviewComment">Comment</label>
+    <textarea id="reviewComment" required placeholder="What did you take from it?"></textarea>
+    <label for="usefulness">Usefulness <output id="reviewValue">2.5</output></label>
+    <input id="usefulness" type="range" min="0" max="5" step="0.1" value="2.5" aria-describedby="reviewValue">
+    <button type="submit">Save review and mark as read</button>
+  </form>
+</dialog>
+<dialog id="reviewViewDialog">
+  <form method="dialog">
+    <strong id="reviewViewTitle">Review</strong>
+    <div id="reviewViewScore" class="hint"></div>
+    <p id="reviewViewComment"></p>
+    <button type="submit">Close</button>
+  </form>
+</dialog>
 <div id="toast" role="status"></div>
 
 <script>
@@ -374,6 +403,7 @@
   let problem = null;
   let layoutName = "mondrian";
   let themeName = "destijl";
+  let reading = null;
 
   try { token = localStorage.getItem(TOKEN_KEY) || ""; } catch {}
 
@@ -478,10 +508,10 @@
     },
     history: {
       index: false,
-      columns: [["Title", null], ["Read", "c-read"]],
-      cells: (p) => [p.title || p.url, fmt(p.read_at)],
+      columns: [["Title", null], ["Review", "c-review"], ["Score", "c-score"], ["Read", "c-read"]],
+      cells: (p) => [p.title || p.url, p.review_comment || "—", p.usefulness == null ? "—" : p.usefulness + " / 5", fmt(p.read_at)],
       primary: (p) => p.title || p.url,
-      meta: (p) => fmt(p.read_at),
+      meta: (p) => (p.usefulness == null ? "unrated" : p.usefulness + " / 5") + " · " + (p.review_comment || "no review"),
       metaLabel: "read",
       empty: "No papers read yet.",
     },
@@ -860,6 +890,7 @@
       ["h", "History", () => show("history"), "Hist"],
     ],
     history: [
+      ["i", "View review", () => openReview(), "Review"],
       ["r", "Re-add to stack", () => restore(), "Re-add"],
       ["o", "Open PDF", () => openHighlighted(false), "Open"],
       ["x", "Forget", () => forget(), "Forget"],
@@ -906,17 +937,34 @@
       else { toast("Added"); $("link").value = ""; $("link").focus(); }
     } catch (e) { toast(e.message, true); }
   }
-  // Open the tab synchronously (popup blockers), then point it at the PDF once the server answers.
-  async function read(kind) {
-    const win = window.open("about:blank", "_blank");
+  // Open the paper synchronously so the browser permits it; the required review stays
+  // in this tab until the reader returns and records it.
+  function read(kind) {
+    const paper = kind === "top" ? state.papers.at(-1) : state.papers[0];
+    if (!paper) { toast("Stack is empty", true); return; }
+    const win = window.open(readUrl(paper), "_blank", "noopener");
+    reading = { kind, paper, win };
+    $("reviewTitle").textContent = paper.title || paper.url;
+    $("reviewComment").value = "";
+    $("usefulness").value = "2.5";
+    $("reviewValue").value = "2.5";
+    $("reviewDialog").showModal();
+    $("reviewComment").focus();
+  }
+  async function submitReview() {
+    if (!reading) return;
+    const comment = $("reviewComment").value.trim();
+    if (!comment) { toast("A review comment is required", true); $("reviewComment").focus(); return; }
+    const usefulness = Number($("usefulness").value);
+    const { kind, paper, win } = reading;
     try {
-      const { data } = await api("POST", kind === "top" ? "/api/pop" : "/api/take");
+      const { data } = await api("POST", kind === "top" ? "/api/pop" : "/api/take", { url: paper.url, comment, usefulness });
       if (data && data.state) apply(data.state);
-      if (!data || !data.paper) { if (win) win.close(); toast("Stack is empty", true); return; }
-      const target = readUrl(data.paper);
-      if (win) win.location = target; else window.open(target, "_blank", "noopener");
+      if (!data || !data.paper) { if (win) win.close(); toast("That paper is no longer in this position", true); return; }
+      $("reviewDialog").close();
+      reading = null;
       toast("Reading from " + kind + ": " + data.paper.title);
-    } catch (e) { if (win) win.close(); toast(e.message, true); }
+    } catch (e) { toast(e.message, true); }
   }
   function openHighlighted(page) {
     const p = highlighted();
@@ -938,6 +986,13 @@
     if (!p || screen !== "history") return;
     mutate("DELETE", "/api/history?url=" + encodeURIComponent(p.url), null, "Forgotten: " + p.title);
   }
+  function openReview(paper = highlighted()) {
+    if (!paper || screen !== "history") return;
+    $("reviewViewTitle").textContent = paper.title || paper.url;
+    $("reviewViewScore").textContent = paper.usefulness == null ? "No usefulness score" : "Usefulness: " + paper.usefulness + " / 5";
+    $("reviewViewComment").textContent = paper.review_comment || "No review was recorded.";
+    $("reviewViewDialog").showModal();
+  }
 
   // ---- input: one delegated pair of listeners, not two per row ------------
   function hostClick(e) {
@@ -955,7 +1010,7 @@
 
   // ---- keyboard (mirrors the TUI bindings) --------------------------------
   document.addEventListener("keydown", (e) => {
-    if ($("tokenDialog").open) return;
+    if ($("tokenDialog").open || $("reviewDialog").open || $("reviewViewDialog").open) return;
     if (document.activeElement === $("link")) {
       if (e.key === "Enter") { e.preventDefault(); add($("link").value); }
       else if (e.key === "Escape") { e.preventDefault(); $("link").blur(); }
@@ -972,6 +1027,7 @@
     if (k === "t") { e.preventDefault(); return cycleTheme(1); }
     if (k === "T") { e.preventDefault(); return cycleTheme(-1); }
     if (screen === "history") {
+      if (k === "i") { e.preventDefault(); return openReview(); }
       if (k === "r" || k === "Enter") { e.preventDefault(); return restore(); }
       if (k === "o") { e.preventDefault(); return openHighlighted(false); }
       if (k === "x") { e.preventDefault(); return forget(); }
@@ -998,6 +1054,9 @@
     version = -1;
     refresh().then(startPolling);
   });
+  $("reviewForm").addEventListener("submit", (e) => { e.preventDefault(); submitReview(); });
+  $("reviewDialog").addEventListener("cancel", (e) => e.preventDefault());
+  $("usefulness").addEventListener("input", () => { $("reviewValue").value = $("usefulness").value; });
   $("header").addEventListener("dblclick", askToken);
 
   // ---- wiring -------------------------------------------------------------
