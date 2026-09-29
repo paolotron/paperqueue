@@ -131,3 +131,28 @@ def test_history_is_capped():
         s.push(Paper(url=str(i)))
         s.pop("A comment", 2.0)
     assert [p.url for p in s.history_newest_first()] == ["4", "3", "2"]
+
+
+def test_conference_is_filled_by_resolution_but_a_manual_value_wins(tmp_path: Path):
+    s = Stack(path=tmp_path / "s.json")
+    s.push(Paper(url="a"))
+    assert s.update("a", conference="CVPR 2025")
+    assert s.find("a").conference == "CVPR 2025"
+    s.set_conference("a", "  ECCV 2026 ")
+    s.update("a", conference="CVPR 2025")
+    assert s.find("a").conference == "ECCV 2026"
+
+    s.pop("read it", 3)
+    assert s.set_conference("a", "ICML").conference == "ICML"  # history is editable too
+    assert s.set_conference("a", "   ").conference is None
+    assert s.set_conference("missing", "ICML") is None
+
+    s.set_conference("a", "NeurIPS 2023")
+    s.save()
+    loaded = Stack.load(tmp_path / "s.json")
+    assert loaded.find_history("a").conference == "NeurIPS 2023"
+    assert loaded.restore("a").conference == "NeurIPS 2023"  # it describes the paper, not the reading
+
+
+def test_old_files_without_conference_load():
+    assert Paper.from_dict({"url": "a"}).conference is None

@@ -11,6 +11,9 @@ from pathlib import Path
 from typing import Iterator
 
 
+MAX_CONFERENCE = 80
+
+
 def default_path() -> Path:
     base = os.environ.get("XDG_DATA_HOME") or str(Path.home() / ".local" / "share")
     return Path(base) / "paperqueue" / "stack.json"
@@ -30,6 +33,7 @@ class Paper:
     read_at: str | None = None
     review_comment: str | None = None
     usefulness: float | None = None
+    conference: str | None = None
 
     @property
     def read_url(self) -> str:
@@ -58,6 +62,7 @@ class Paper:
             read_at=data.get("read_at"),
             review_comment=data.get("review_comment"),
             usefulness=data.get("usefulness"),
+            conference=data.get("conference") or None,
         )
 
 
@@ -209,8 +214,9 @@ class Stack:
         title: str | None = None,
         pdf_url: str | None = None,
         arxiv_id: str | None = None,
+        conference: str | None = None,
     ) -> bool:
-        """Apply resolved metadata. Returns False if the paper is gone."""
+        """Apply resolved metadata. Returns False if the paper is gone. Never overwrites a conference already set."""
         paper = self.find(url)
         if paper is None:
             return False
@@ -220,7 +226,16 @@ class Stack:
             paper.pdf_url = pdf_url
         if arxiv_id:
             paper.arxiv_id = arxiv_id
+        if conference and not paper.conference:
+            paper.conference = conference
         return True
+
+    def set_conference(self, url: str, conference: str) -> Paper | None:
+        """Set (or clear, with an empty string) the conference of a queued or read paper."""
+        paper = self.find(url) or self.find_history(url)
+        if paper is not None:
+            paper.conference = conference.strip()[:MAX_CONFERENCE] or None
+        return paper
 
     def top_first(self) -> list[Paper]:
         return list(reversed(self._papers))

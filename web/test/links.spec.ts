@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { normalize, openreviewPdf, parseArxivEntries, parsePage, resolve, scholarInboxSlugWords } from "../src/links";
+import { normalize, openreviewPdf, parseArxivEntries, parsePage, resolve, scholarInboxSlugWords, venueFromText, venueFromUrl } from "../src/links";
 
 const ABS = "https://arxiv.org/abs/1706.03762";
 
@@ -39,7 +39,7 @@ const ATOM = `<?xml version="1.0" encoding="UTF-8"?>
 
 describe("arXiv atom", () => {
   it("parses entries", () => {
-    expect(parseArxivEntries(ATOM)).toEqual([["1706.03762", "Attention Is All You Need"]]);
+    expect(parseArxivEntries(ATOM)).toEqual([["1706.03762", "Attention Is All You Need", null]]);
   });
   it("ignores error entries", () => {
     expect(parseArxivEntries('<feed><entry><id>http://arxiv.org/api/errors#x</id><title>Error</title></entry></feed>')).toEqual([]);
@@ -59,6 +59,7 @@ describe("parsePage", () => {
       title: "JSON: Jigsaw Self-play Optimization for Normalizing Flows",
       pdf_url: "https://media.eventhosts.cc/Conferences/ECCV2026/pdfs/2253.pdf",
       arxiv_id: null,
+      conference: null,
     });
   });
 
@@ -126,6 +127,7 @@ describe("resolve with the arXiv API down", () => {
       title: "RelateAnything: Real-Time Open-Vocabulary Relation Prediction From Any Inputs",
       pdf_url: "https://arxiv.org/pdf/2609.12552",
       arxiv_id: "2609.12552",
+      conference: null,
     });
   });
 
@@ -137,6 +139,61 @@ describe("resolve with the arXiv API down", () => {
       title: null,
       pdf_url: "https://arxiv.org/pdf/2609.12552",
       arxiv_id: "2609.12552",
+      conference: null,
     });
+  });
+});
+
+const ATOM_VENUE = `<feed xmlns="http://www.w3.org/2005/Atom" xmlns:arxiv="http://arxiv.org/schemas/atom">
+  <entry><id>http://arxiv.org/abs/2501.00001v1</id><title>A Paper</title>
+  <arxiv:comment>Accepted at CVPR 2025. Code: https://x.y</arxiv:comment></entry>
+  <entry><id>http://arxiv.org/abs/2501.00002v1</id><title>Another Paper</title>
+  <arxiv:journal_ref>NeurIPS'23</arxiv:journal_ref><arxiv:comment>ICML 2022 workshop</arxiv:comment></entry>
+</feed>`;
+
+describe("venues", () => {
+  it("reads journal_ref, then comment, from arXiv entries", () => {
+    expect(parseArxivEntries(ATOM_VENUE)).toEqual([
+      ["2501.00001", "A Paper", "CVPR 2025"],
+      ["2501.00002", "Another Paper", "NeurIPS 2023"],
+    ]);
+  });
+
+  it.each([
+    ["Accepted at CVPR 2025", "CVPR 2025"],
+    ["NeurIPS'23", "NeurIPS 2023"],
+    ["ECCV2026", "ECCV 2026"],
+    ["In ICLR, 2024", "ICLR 2024"],
+    ["NIPS 2017", "NeurIPS 2017"],
+    ["SIGGRAPH Asia 2023", "SIGGRAPH Asia 2023"],
+    ["Proceedings of NAACL", "NAACL"],
+    ["a chi-squared test", null],
+    ["", null],
+  ])("text %j", (text, expected) => {
+    expect(venueFromText(text)).toBe(expected);
+  });
+
+  it.each([
+    ["https://media.eventhosts.cc/Conferences/ECCV2026/pdfs/2253.pdf", "ECCV 2026"],
+    ["https://openaccess.thecvf.com/content/CVPR2024/html/X_CVPR_2024_paper.html", "CVPR 2024"],
+    ["https://proceedings.neurips.cc/paper_files/paper/2023/hash/abc-Abstract-Conference.html", "NeurIPS 2023"],
+    ["https://aclanthology.org/2024.acl-long.12/", "ACL 2024"],
+    ["https://www.scholar-inbox.com/paper/Foo2026CVPR_Some_Title", "CVPR 2026"],
+    ["https://www.scholar-inbox.com/paper/Fu2026ARXIV_DeCAL", null],
+    ["https://eccv.ecva.net/virtual/2026/poster/3623", "ECCV 2026"],
+    ["https://neurips.cc/virtual/2023/poster/1", "NeurIPS 2023"],
+    ["https://www.example.org/virtual/2023/poster/1", null],
+    ["https://example.com/paper.pdf", null],
+  ])("url %s", (url, expected) => {
+    expect(venueFromUrl(url)).toBe(expected);
+  });
+
+  it("citation conference meta", async () => {
+    const page = `<html><head><meta name="citation_title" content="T T T">
+    <meta name="citation_conference_title" content="Proceedings of the IEEE/CVF Conference (CVPR 2024)"></head></html>`;
+    expect((await parsePage(page, "https://a.b")).conference).toBe("CVPR 2024");
+    const other = '<html><head><meta name="citation_conference_title" content="Some Workshop"></head></html>';
+    expect((await parsePage(other, "https://a.b")).conference).toBe("Some Workshop");
+    expect((await parsePage("<html><title>T</title></html>", "https://a.b")).conference).toBeNull();
   });
 });

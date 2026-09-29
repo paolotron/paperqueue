@@ -44,11 +44,28 @@ describe("PaperStack", () => {
   it("applyResolved updates papers and history", async () => {
     const s = fresh();
     await s.push("https://x.org/p", null, false);
-    expect(await s.applyResolved("https://x.org/p", { title: "T", pdf_url: "https://x.org/p.pdf", arxiv_id: null })).toBe(true);
+    expect(await s.applyResolved("https://x.org/p", { title: "T", pdf_url: "https://x.org/p.pdf", arxiv_id: null, conference: null })).toBe(true);
     const p = (await s.getState()).papers[0];
     expect(p.title).toBe("T");
     expect(p.pdf_url).toBe("https://x.org/p.pdf");
-    expect(await s.applyResolved("nope", { title: "T", pdf_url: null, arxiv_id: null })).toBe(false);
+    expect(await s.applyResolved("nope", { title: "T", pdf_url: null, arxiv_id: null, conference: null })).toBe(false);
+  });
+
+  it("conference: resolution fills it, a manual value wins, history is editable", async () => {
+    const s = fresh();
+    await s.push("a", null, false);
+    const none = { title: null, pdf_url: null, arxiv_id: null };
+    expect(await s.applyResolved("a", { ...none, conference: "CVPR 2025" })).toBe(true);
+    expect((await s.getState()).papers[0].conference).toBe("CVPR 2025");
+    expect((await s.setConference("a", "  ECCV 2026 ")).paper?.conference).toBe("ECCV 2026");
+    await s.applyResolved("a", { ...none, conference: "CVPR 2025" });
+    expect((await s.getState()).papers[0].conference).toBe("ECCV 2026");
+    await s.pop(review);
+    expect((await s.setConference("a", "ICML")).paper?.conference).toBe("ICML");
+    expect((await s.setConference("a", "   ")).paper?.conference).toBeNull();
+    expect((await s.setConference("missing", "ICML")).paper).toBeNull();
+    await s.setConference("a", "NeurIPS 2023");
+    expect((await s.restore("a")).paper?.conference).toBe("NeurIPS 2023");
   });
 
   it("import merges without duplicating", async () => {
@@ -96,6 +113,13 @@ describe("HTTP API", () => {
     const pop = await SELF.fetch("https://pq/api/pop", { method: "POST", headers: auth, body: JSON.stringify(review) });
     expect(pop.status).toBe(200);
     expect((await SELF.fetch("https://pq/api/pop", { method: "POST", headers: auth, body: JSON.stringify(review) })).status).toBe(404);
+
+    const patchBody = (body: unknown) => ({ method: "PATCH", headers: auth, body: JSON.stringify(body) });
+    const conf = await SELF.fetch("https://pq/api/papers", patchBody({ url: "https://arxiv.org/abs/1706.03762", conference: "NeurIPS 2017" }));
+    expect(conf.status).toBe(200);
+    expect(((await conf.json()) as { paper: { conference: string } }).paper.conference).toBe("NeurIPS 2017");
+    expect((await SELF.fetch("https://pq/api/papers", patchBody({ url: "https://arxiv.org/abs/1706.03762" }))).status).toBe(400);
+    expect((await SELF.fetch("https://pq/api/papers", patchBody({ url: "nope", conference: "x" }))).status).toBe(404);
 
     const restore = await SELF.fetch("https://pq/api/history/restore", { method: "POST", headers: auth, body: JSON.stringify({ url: "https://arxiv.org/abs/1706.03762" }) });
     expect(restore.status).toBe(200);

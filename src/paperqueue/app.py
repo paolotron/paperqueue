@@ -232,12 +232,55 @@ class ReviewDetailsScreen(ModalScreen[None]):
             self.action_close()
 
 
+class ConferenceScreen(ModalScreen[str | None]):
+    """Edit a paper's conference. Enter saves (empty clears), Esc cancels."""
+
+    BINDINGS = [Binding("escape", "cancel", "Cancel")]
+
+    def __init__(self, paper: Paper) -> None:
+        super().__init__()
+        self.paper = paper
+
+    def compose(self) -> ComposeResult:
+        yield Static(f"Conference: {self.paper.title}", id="conference-title")
+        yield Input(value=self.paper.conference or "", placeholder="e.g. CVPR 2025", id="conference-input")
+        yield Static("Enter saves, an empty value clears it. Esc cancels.", classes="review-hint")
+
+    def on_mount(self) -> None:
+        self.query_one(Input).focus()
+
+    def on_input_submitted(self, event: Input.Submitted) -> None:
+        event.stop()
+        self.dismiss(event.value)
+
+    def action_cancel(self) -> None:
+        self.dismiss(None)
+
+
+def edit_conference(screen: Screen, stack: Stack | RemoteStack, paper: Paper, refresh) -> None:
+    """Open the conference editor for a paper; both the stack and history screens use it."""
+
+    def done(value: str | None) -> None:
+        if value is None:
+            return
+        try:
+            stack.set_conference(paper.url, value)
+        except RemoteError as exc:
+            screen.notify(str(exc), severity="error")
+            return
+        stack.save()
+        refresh()
+
+    screen.app.push_screen(ConferenceScreen(paper), done)
+
+
 class HistoryScreen(Screen[None]):
     """Papers already read (or deleted), newest first. Restore pushes one back on the stack."""
 
     BINDINGS = [
         Binding("i", "review", "View review"),
         Binding("r,enter", "restore", "Re-add to stack"),
+        Binding("c", "conference", "Conference"),
         Binding("o", "open", "Open PDF"),
         Binding("x", "forget", "Forget"),
         Binding("escape,h,q", "app.pop_screen", "Back"),
@@ -257,6 +300,7 @@ class HistoryScreen(Screen[None]):
         self.sub_title = "history"
         table = self.query_one(DataTable)
         table.add_column("Title", key="title")
+        table.add_column("Conference", key="conference", width=14)
         table.add_column("Review", key="review")
         table.add_column("Score", key="score", width=7)
         table.add_column("Read", key="read", width=16)
@@ -271,6 +315,7 @@ class HistoryScreen(Screen[None]):
         for paper in papers:
             table.add_row(
                 paper.title,
+                paper.conference or "—",
                 paper.review_comment or "—",
                 _fmt_usefulness(paper.usefulness),
                 _fmt_added(paper.read_at or ""),
@@ -312,6 +357,11 @@ class HistoryScreen(Screen[None]):
         if paper is not None:
             self.app.push_screen(ReviewDetailsScreen(paper))
 
+    def action_conference(self) -> None:
+        paper = self._highlighted()
+        if paper is not None:
+            edit_conference(self, self.stack, paper, self.refresh_table)
+
     def action_forget(self) -> None:
         paper = self._highlighted()
         if paper is None:
@@ -334,6 +384,7 @@ class PaperQueue(App[None]):
         Binding("o", "peek", "Open (keep)"),
         Binding("O", "peek_page", "Open page", key_display="O"),
         Binding("d", "delete", "Delete"),
+        Binding("c", "conference", "Conference"),
         Binding("a", "focus_input", "Add"),
         Binding("h", "history", "History"),
         Binding("t", "cycle_theme", "Theme"),
@@ -363,6 +414,7 @@ class PaperQueue(App[None]):
         table = self.query_one(DataTable)
         table.add_column("#", key="idx", width=4)
         table.add_column("Title", key="title")
+        table.add_column("Conference", key="conference", width=14)
         table.add_column("PDF", key="pdf", width=5)
         table.add_column("Added", key="added", width=16)
         self.refresh_table()
@@ -399,7 +451,7 @@ class PaperQueue(App[None]):
         papers = self.stack.top_first()
         for i, paper in enumerate(papers, start=1):
             pdf = "yes" if paper.pdf_url else "-"
-            table.add_row(str(i), paper.title, pdf, _fmt_added(paper.added_at), key=paper.url)
+            table.add_row(str(i), paper.title, paper.conference or "—", pdf, _fmt_added(paper.added_at), key=paper.url)
         table.display = bool(papers)
         empty.display = not papers
         if papers:
@@ -439,11 +491,11 @@ class PaperQueue(App[None]):
     @work(thread=True, group="resolve")
     def resolve_paper(self, url: str, arxiv_id: str | None) -> None:
         res = links.resolve(url, arxiv_id)
-        if res.title or res.pdf_url or res.arxiv_id:
+        if res.title or res.pdf_url or res.arxiv_id or res.conference:
             self.call_from_thread(self._apply_resolved, url, res)
 
     def _apply_resolved(self, url: str, res: links.Resolved) -> None:
-        if self.stack.update(url, title=res.title, pdf_url=res.pdf_url, arxiv_id=res.arxiv_id):
+        if self.stack.update(url, title=res.title, pdf_url=res.pdf_url, arxiv_id=res.arxiv_id, conference=res.conference):
             self.stack.save()
             self.refresh_table()
 
@@ -513,6 +565,13 @@ class PaperQueue(App[None]):
         self.stack.save()
         self.refresh_table()
         self.notify(f"Removed: {paper.title}")
+
+    def action_conference(self) -> None:
+        paper = self._highlighted()
+        if paper is None:
+            self.notify("Nothing selected", severity="warning")
+            return
+        edit_conference(self.screen, self.stack, paper, self.refresh_table)
 
     def action_cycle_theme(self) -> None:
         """Cycle the palettes, mirroring `t` in the web client."""

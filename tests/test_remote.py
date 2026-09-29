@@ -75,6 +75,12 @@ class FakeServer:
                     papers.append(p); added += 1
             self.bump()
             return 200, {"added_papers": added, "added_history": 0, "state": self.state}
+        if method == "PATCH" and path == "/api/papers":
+            p = next((p for p in papers + history if p["url"] == body["url"]), None)
+            if not p:
+                return 404, {"paper": None, "state": self.state}
+            p["conference"] = body["conference"].strip() or None; self.bump()
+            return 200, {"paper": p, "state": self.state}
         if path == "/api/boom":
             return 500, {"error": "kaboom"}
         return 404, {"error": "not found"}
@@ -100,7 +106,7 @@ def server():
             self.end_headers()
             self.wfile.write(data)
 
-        do_GET = do_POST = do_DELETE = _serve
+        do_GET = do_POST = do_DELETE = do_PATCH = _serve
 
         def log_message(self, *_):
             pass
@@ -130,6 +136,9 @@ def test_remote_stack_round_trip(server):
     assert rs.find_history("a") is not None
     assert rs.find_history("a").usefulness == 2.3
 
+    assert rs.set_conference("a", " CVPR 2025 ").conference == "CVPR 2025"
+    assert rs.find_history("a").conference == "CVPR 2025"
+    assert rs.set_conference("zzz", "ICML") is None
     assert rs.restore("a").url == "a"
     assert [p.url for p in rs.top_first()] == ["a"]
     assert rs.remove("a").url == "a"

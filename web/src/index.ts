@@ -79,6 +79,12 @@ async function api(request: Request, env: Env, stub: DurableObjectStub<PaperStac
     const r = await stub.takeBottom(requireReview(body), typeof body.url === "string" ? body.url : undefined);
     return json(r, r.paper ? 200 : 404);
   }
+  if (method === "PATCH" && path === "/api/papers") {
+    const body = await readJson(request);
+    if (typeof body.conference !== "string") throw new BadRequest("missing conference");
+    const r = await stub.setConference(requireUrl(body.url), body.conference);
+    return json(r, r.paper ? 200 : 404);
+  }
   if (method === "DELETE" && path === "/api/papers") {
     const r = await stub.remove(requireUrl(url.searchParams.get("url")));
     return json(r, r.paper ? 200 : 404);

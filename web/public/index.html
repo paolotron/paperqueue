@@ -158,6 +158,7 @@
   .c-idx { width: 3.5em; color: var(--muted); }
   [data-layout="skin"] tr.cursor .c-idx { color: var(--cursor-fg); }
   .c-pdf { width: 4em; }
+  .c-conf { width: 9em; }
   .c-when, .c-read { width: 11.5em; }
   .c-score { width: 6em; }
 
@@ -318,7 +319,7 @@
 
   /* ==================================================== small / touch == */
   @media (max-width: 620px) {
-    .c-when, .c-read, .c-pdf { display: none; }
+    .c-when, .c-read, .c-pdf, .c-conf { display: none; }
     [data-layout="nonogram"] .t { font-size: 13px; }
   }
   @media (pointer: coarse) {
@@ -377,6 +378,15 @@
     <label for="usefulness">Usefulness <output id="reviewValue">2.5</output></label>
     <input id="usefulness" type="range" min="0" max="5" step="0.1" value="2.5" aria-describedby="reviewValue">
     <button type="submit">Save review and mark as read</button>
+  </form>
+</dialog>
+<dialog id="conferenceDialog">
+  <form id="conferenceForm">
+    <strong>Conference</strong>
+    <div id="conferenceTitle" class="hint"></div>
+    <input id="conference" type="text" maxlength="80" autocomplete="off" placeholder="e.g. CVPR 2025">
+    <div class="hint">Leave empty to clear. Esc cancels.</div>
+    <button type="submit">Save</button>
   </form>
 </dialog>
 <dialog id="reviewViewDialog">
@@ -499,8 +509,8 @@
   const FIELDS = {
     main: {
       index: true,
-      columns: [["#", "c-idx"], ["Title", null], ["PDF", "c-pdf"], ["Added", "c-when"]],
-      cells: (p, i) => [String(i + 1), p.title || p.url, p.pdf_url ? "yes" : "-", fmt(p.added_at)],
+      columns: [["#", "c-idx"], ["Title", null], ["Conference", "c-conf"], ["PDF", "c-pdf"], ["Added", "c-when"]],
+      cells: (p, i) => [String(i + 1), p.title || p.url, p.conference || "—", p.pdf_url ? "yes" : "-", fmt(p.added_at)],
       primary: (p) => p.title || p.url,
       meta: (p) => fmt(p.added_at),
       metaLabel: "added",
@@ -508,8 +518,8 @@
     },
     history: {
       index: false,
-      columns: [["Title", null], ["Review", "c-review"], ["Score", "c-score"], ["Read", "c-read"]],
-      cells: (p) => [p.title || p.url, p.review_comment || "—", p.usefulness == null ? "—" : p.usefulness + " / 5", fmt(p.read_at)],
+      columns: [["Title", null], ["Conference", "c-conf"], ["Review", "c-review"], ["Score", "c-score"], ["Read", "c-read"]],
+      cells: (p) => [p.title || p.url, p.conference || "—", p.review_comment || "—", p.usefulness == null ? "—" : p.usefulness + " / 5", fmt(p.read_at)],
       primary: (p) => p.title || p.url,
       meta: (p) => (p.usefulness == null ? "unrated" : p.usefulness + " / 5") + " · " + (p.review_comment || "no review"),
       metaLabel: "read",
@@ -690,7 +700,7 @@
           li.append(
             el("b", "num", String(i + 1)),
             el("span", "clue", fields.primary(p)),
-            el("span", "enum", (p.pdf_url ? "PDF · " : "") + fields.metaLabel + " " + fields.meta(p)),
+            el("span", "enum", (p.conference ? p.conference + " · " : "") + (p.pdf_url ? "PDF · " : "") + fields.metaLabel + " " + fields.meta(p)),
           );
           ol.appendChild(li);
         });
@@ -766,7 +776,7 @@
           const t = el("span", "btitle", fields.primary(p));
           t.title = fields.primary(p);
           d.appendChild(t);
-          if (hPx > 96) d.appendChild(el("span", "bmeta", fields.meta(p)));
+          if (hPx > 96) d.appendChild(el("span", "bmeta", (p.conference ? p.conference + " · " : "") + fields.meta(p)));
           frag.appendChild(d);
         }
         container.appendChild(frag);
@@ -886,12 +896,14 @@
       ["o", "Open (keep)", () => openHighlighted(false), "Open"],
       ["O", "Open page", () => openHighlighted(true), "Page"],
       ["d", "Delete", () => del(), "Del"],
+      ["c", "Conference", () => editConference(), "Conf"],
       ["a", "Add", () => $("link").focus(), "Add"],
       ["h", "History", () => show("history"), "Hist"],
     ],
     history: [
       ["i", "View review", () => openReview(), "Review"],
       ["r", "Re-add to stack", () => restore(), "Re-add"],
+      ["c", "Conference", () => editConference(), "Conf"],
       ["o", "Open PDF", () => openHighlighted(false), "Open"],
       ["x", "Forget", () => forget(), "Forget"],
       ["esc", "Back", () => show("main"), "Back"],
@@ -986,6 +998,22 @@
     if (!p || screen !== "history") return;
     mutate("DELETE", "/api/history?url=" + encodeURIComponent(p.url), null, "Forgotten: " + p.title);
   }
+  let editing = null;
+  function editConference(paper = highlighted()) {
+    if (!paper) return;
+    editing = paper;
+    $("conferenceTitle").textContent = paper.title || paper.url;
+    $("conference").value = paper.conference || "";
+    $("conferenceDialog").showModal();
+    $("conference").select();
+  }
+  async function saveConference() {
+    if (!editing) return;
+    const p = editing, conference = $("conference").value.trim();
+    $("conferenceDialog").close();
+    editing = null;
+    await mutate("PATCH", "/api/papers", { url: p.url, conference }, conference ? "Conference: " + conference : "Conference cleared");
+  }
   function openReview(paper = highlighted()) {
     if (!paper || screen !== "history") return;
     $("reviewViewTitle").textContent = paper.title || paper.url;
@@ -1010,7 +1038,7 @@
 
   // ---- keyboard (mirrors the TUI bindings) --------------------------------
   document.addEventListener("keydown", (e) => {
-    if ($("tokenDialog").open || $("reviewDialog").open || $("reviewViewDialog").open) return;
+    if ($("tokenDialog").open || $("reviewDialog").open || $("reviewViewDialog").open || $("conferenceDialog").open) return;
     if (document.activeElement === $("link")) {
       if (e.key === "Enter") { e.preventDefault(); add($("link").value); }
       else if (e.key === "Escape") { e.preventDefault(); $("link").blur(); }
@@ -1026,6 +1054,7 @@
     if (k === "V") { e.preventDefault(); return cycleLayout(-1); }
     if (k === "t") { e.preventDefault(); return cycleTheme(1); }
     if (k === "T") { e.preventDefault(); return cycleTheme(-1); }
+    if (k === "c") { e.preventDefault(); return editConference(); }
     if (screen === "history") {
       if (k === "i") { e.preventDefault(); return openReview(); }
       if (k === "r" || k === "Enter") { e.preventDefault(); return restore(); }
@@ -1056,6 +1085,8 @@
   });
   $("reviewForm").addEventListener("submit", (e) => { e.preventDefault(); submitReview(); });
   $("reviewDialog").addEventListener("cancel", (e) => e.preventDefault());
+  $("conferenceForm").addEventListener("submit", (e) => { e.preventDefault(); saveConference(); });
+  $("conferenceDialog").addEventListener("close", () => { editing = null; });
   $("usefulness").addEventListener("input", () => { $("reviewValue").value = $("usefulness").value; });
   $("header").addEventListener("dblclick", askToken);
 

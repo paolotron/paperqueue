@@ -111,6 +111,9 @@ class RemoteStack:
     def forget(self, url: str) -> Paper | None:
         return self._mutate("DELETE", f"/api/history?url={quote(url, safe='')}")[1]
 
+    def set_conference(self, url: str, conference: str) -> Paper | None:
+        return self._mutate("PATCH", "/api/papers", {"url": url, "conference": conference})[1]
+
     def update(self, url: str, **_: Any) -> bool:  # resolution happens server-side
         return False
 

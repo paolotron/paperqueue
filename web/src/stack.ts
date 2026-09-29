@@ -11,6 +11,7 @@ export interface Paper {
   read_at: string | null;
   review_comment: string | null;
   usefulness: number | null;
+  conference: string | null;
 }
 
 /** Same shape as the TUI's stack.json: papers bottom->top, history oldest->newest. */
@@ -31,12 +32,17 @@ export interface Review {
 }
 
 const MAX_HISTORY = 500;
+const MAX_CONFERENCE = 80;
 const RETRY_MS = 10 * 60 * 1000;
 
 const now = () => new Date().toISOString().replace(/\.\d{3}Z$/, "+00:00");
 
 function needsResolve(p: Paper): boolean {
   return !p.pdf_url || p.title === p.url;
+}
+
+function cleanConference(value: unknown): string | null {
+  return typeof value === "string" && value.trim() ? value.trim().slice(0, MAX_CONFERENCE) : null;
 }
 
 function coerce(raw: Partial<Paper> & { url: string }): Paper {
@@ -49,6 +55,7 @@ function coerce(raw: Partial<Paper> & { url: string }): Paper {
     read_at: raw.read_at ?? null,
     review_comment: typeof raw.review_comment === "string" && raw.review_comment.trim() ? raw.review_comment.trim() : null,
     usefulness: typeof raw.usefulness === "number" && Number.isFinite(raw.usefulness) ? raw.usefulness : null,
+    conference: cleanConference(raw.conference),
   };
 }
 
@@ -101,13 +108,15 @@ export class PaperStack extends DurableObject<Env> {
   }
 
   async applyResolved(url: string, res: Resolved): Promise<boolean> {
-    if (!res.title && !res.pdf_url && !res.arxiv_id) return false;
+    if (!res.title && !res.pdf_url && !res.arxiv_id && !res.conference) return false;
     const state = await this.load();
     const paper = state.papers.find((p) => p.url === url) ?? state.history.find((p) => p.url === url);
     if (!paper) return false;
     if (res.title) paper.title = res.title;
     if (res.pdf_url) paper.pdf_url = res.pdf_url;
     if (res.arxiv_id) paper.arxiv_id = res.arxiv_id;
+    // A conference the reader typed in wins over whatever the resolver guesses.
+    if (res.conference && !paper.conference) paper.conference = res.conference;
     await this.commit(state);
     return true;
   }
@@ -174,6 +183,15 @@ export class PaperStack extends DurableObject<Env> {
       paper.usefulness = null;
       state.papers.push(paper);
     }
+    return { paper, state: await this.commit(state) };
+  }
+
+  /** Set (or clear, with an empty string) the conference of a queued or read paper. */
+  async setConference(url: string, conference: string): Promise<Mutation> {
+    const state = await this.load();
+    const paper = state.papers.find((p) => p.url === url) ?? state.history.find((p) => p.url === url);
+    if (!paper) return { paper: null, state };
+    paper.conference = cleanConference(conference);
     return { paper, state: await this.commit(state) };
   }
 

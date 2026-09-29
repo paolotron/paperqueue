@@ -4,6 +4,7 @@ export interface Resolved {
   title: string | null;
   pdf_url: string | null;
   arxiv_id: string | null;
+  conference: string | null;
 }
 
 const USER_AGENT = "Mozilla/5.0 (X11; Linux x86_64) paperqueue/0.1";
@@ -19,7 +20,67 @@ const ARXIV_HOSTS = new Set(["arxiv.org", "www.arxiv.org", "export.arxiv.org", "
 const SCHOLAR_INBOX_HOSTS = new Set(["scholar-inbox.com", "www.scholar-inbox.com"]);
 const OPENREVIEW_HOSTS = new Set(["openreview.net", "www.openreview.net"]);
 const BOT_WALL_RE = /just a moment|verifying your browser|attention required|access denied/i;
+// Venues shown in the Conference column, in canonical spelling. Matching is
+// case-sensitive (plus the spellings in VENUE_ALIASES) so "chi-squared" or
+// "www." never count as a venue.
+export const VENUES = [
+  "CVPR", "ICCV", "ECCV", "WACV", "BMVC", "3DV", "NeurIPS", "ICML", "ICLR", "AISTATS", "UAI", "COLM",
+  "AAAI", "IJCAI", "ACL", "EMNLP", "NAACL", "COLING", "KDD", "WWW", "SIGGRAPH Asia", "SIGGRAPH", "CHI",
+  "UIST", "CoRL", "RSS", "ICRA", "IROS", "MICCAI", "TMLR", "TPAMI",
+];
+const VENUE_ALIASES: Record<string, string> = { NIPS: "NeurIPS", NEURIPS: "NeurIPS", Neurips: "NeurIPS", CORL: "CoRL" };
+const VENUE_RE = new RegExp(
+  String.raw`(?<![A-Za-z0-9])(` +
+    [...new Set([...VENUES, ...Object.keys(VENUE_ALIASES)])]
+      .sort((a, b) => b.length - a.length)
+      .map((v) => v.replace(/[.*+?^${}()|[\]\\]/g, "\\$&"))
+      .join("|") +
+    String.raw`)(?![A-Za-z])(?:\s*,?\s*['\u2019]?\s*((?:19|20)\d{2})|\s*['\u2019](\d{2}))?(?!\d)`,
+);
+const MAX_VENUE = 40;
 const STOP_WORDS = new Set(["a", "an", "and", "as", "at", "by", "for", "from", "in", "is", "of", "on", "or", "the", "to", "via", "with"]);
+
+// -- venues --------------------------------------------------------------
+
+/** 'Accepted at CVPR 2025' -> 'CVPR 2025'; "NeurIPS'23" -> 'NeurIPS 2023'; no known venue -> null. */
+export function venueFromText(text: string | null | undefined): string | null {
+  const m = VENUE_RE.exec(text ?? "");
+  if (!m) return null;
+  const name = VENUE_ALIASES[m[1]] ?? m[1];
+  const year = m[2] ?? (m[3] ? `20${m[3]}` : null);
+  return year ? `${name} ${year}` : name;
+}
+
+/** Venue encoded in a proceedings URL (eventhosts, thecvf, NeurIPS, ACL Anthology, Scholar Inbox slugs). */
+export function venueFromUrl(url: string): string | null {
+  let parsed: URL;
+  try {
+    parsed = new URL(url);
+  } catch {
+    return null;
+  }
+  const host = parsed.hostname.toLowerCase();
+  const path = parsed.pathname;
+  let m: RegExpExecArray | null;
+  if (host === "proceedings.neurips.cc") {
+    m = /\/paper(?:_files\/paper)?\/((?:19|20)\d{2})\//.exec(path);
+    return m ? `NeurIPS ${m[1]}` : "NeurIPS";
+  }
+  if (host === "aclanthology.org") {
+    m = /^\/((?:19|20)\d{2})\.([a-z]+)-/.exec(path);
+    return m ? venueFromText(`${m[2].toUpperCase()} ${m[1]}`) : null;
+  }
+  if (SCHOLAR_INBOX_HOSTS.has(host)) {
+    m = /^\/paper\/[^/_]*?((?:19|20)\d{2})([A-Za-z]+)_/.exec(path);
+    return m ? venueFromText(`${m[2]} ${m[1]}`) : null;
+  }
+  // Virtual conference sites: eccv.ecva.net/virtual/2026/..., iclr.cc/virtual/2024/...
+  m = /^\/virtual\/((?:19|20)\d{2})\//.exec(path);
+  if (m) return venueFromText(`${host.replace(/^www\./, "").split(".")[0].toUpperCase()} ${m[1]}`);
+  // eventhosts "/Conferences/ECCV2026/", thecvf "/content/CVPR2024/", ...
+  m = /\/(?:Conferences|content)\/([A-Za-z]+(?:19|20)\d{2})(?:\/|_)/.exec(path);
+  return m ? venueFromText(m[1]) : null;
+}
 
 // -- normalization ---------------------------------------------------------
 
@@ -102,9 +163,12 @@ async function get(url: string): Promise<string> {
 
 // -- arXiv API -------------------------------------------------------------
 
-/** [[arxivId, title], ...] from an arXiv API Atom response. */
-export function parseArxivEntries(xml: string): Array<[string, string]> {
-  const out: Array<[string, string]> = [];
+/**
+ * [[arxivId, title, venue], ...] from an arXiv API Atom response. The venue comes from
+ * the journal reference, else from the author comment ("Accepted at CVPR 2025").
+ */
+export function parseArxivEntries(xml: string): Array<[string, string, string | null]> {
+  const out: Array<[string, string, string | null]> = [];
   for (const entry of xml.matchAll(/<entry>([\s\S]*?)<\/entry>/g)) {
     const body = entry[1];
     const t = /<title[^>]*>([\s\S]*?)<\/title>/.exec(body);
@@ -112,34 +176,43 @@ export function parseArxivEntries(xml: string): Array<[string, string]> {
     const title = t ? clean(t[1]) : "";
     const m = i ? HREF_ID_RE.exec(i[1]) : null;
     // The API returns a single entry titled "Error" for unknown ids.
-    if (title && title !== "Error" && m) out.push([stripVersion(m[1]), title]);
+    if (title && title !== "Error" && m) {
+      const ref = /<arxiv:journal_ref[^>]*>([\s\S]*?)<\/arxiv:journal_ref>/.exec(body);
+      const comment = /<arxiv:comment[^>]*>([\s\S]*?)<\/arxiv:comment>/.exec(body);
+      const venue = venueFromText(ref && clean(ref[1])) ?? venueFromText(comment && clean(comment[1]));
+      out.push([stripVersion(m[1]), title, venue]);
+    }
   }
   return out;
 }
 
-async function arxivLookup(id: string): Promise<string | null> {
+async function arxivLookup(id: string): Promise<[string, string | null] | null> {
   const entries = parseArxivEntries(await get(`https://export.arxiv.org/api/query?id_list=${encodeURIComponent(id)}`));
-  return entries.length ? entries[0][1] : null;
+  return entries.length ? [entries[0][1], entries[0][2]] : null;
 }
 
-/** Title for an arXiv id: the API first, then the abs page when the API is throttled or down. Never throws. */
-export async function arxivTitle(id: string): Promise<string | null> {
+/** [title, venue] for an arXiv id: the API first, then the abs page when the API is throttled or down. Never throws. */
+export async function arxivInfo(id: string): Promise<[string | null, string | null]> {
   try {
-    const title = await arxivLookup(id);
-    if (title) return title;
+    const hit = await arxivLookup(id);
+    if (hit) return hit;
   } catch {
     // export.arxiv.org rate-limits shared egress IPs (HTTP 429); the abs page carries citation_title too.
   }
   try {
     const page = await parsePage(await get(arxivAbs(id)), arxivAbs(id));
-    return page.title && !looksGeneric(page.title) ? page.title : null;
+    return [page.title && !looksGeneric(page.title) ? page.title : null, page.conference];
   } catch {
-    return null;
+    return [null, null];
   }
 }
 
+export async function arxivTitle(id: string): Promise<string | null> {
+  return (await arxivInfo(id))[0];
+}
+
 /** Find an arXiv paper whose title contains every word, in order. Phrase first, then AND of content words. */
-export async function arxivSearchTitle(words: string[]): Promise<[string, string] | null> {
+export async function arxivSearchTitle(words: string[]): Promise<[string, string, string | null] | null> {
   words = words.filter(Boolean);
   if (!words.length) return null;
   const phrase = encodeURIComponent(words.slice(0, 10).join(" "));
@@ -149,8 +222,8 @@ export async function arxivSearchTitle(words: string[]): Promise<[string, string
   const wanted = words.join(" ");
   for (const query of queries) {
     const xml = await get(`https://export.arxiv.org/api/query?search_query=${query}&max_results=5`);
-    for (const [id, title] of parseArxivEntries(xml)) {
-      if (titleWords(title).join(" ").includes(wanted)) return [id, title];
+    for (const [id, title, venue] of parseArxivEntries(xml)) {
+      if (titleWords(title).join(" ").includes(wanted)) return [id, title, venue];
     }
   }
   return null;
@@ -240,7 +313,7 @@ function join(base: string, href: string): string {
 /** Extract title, PDF link and arXiv id from an HTML page (no network). */
 export async function parsePage(html: string, baseUrl: string): Promise<Resolved> {
   const p = await scrape(html);
-  const res: Resolved = { title: null, pdf_url: null, arxiv_id: null };
+  const res: Resolved = { title: null, pdf_url: null, arxiv_id: null, conference: null };
 
   // Title: citation metadata, then a heading that the <title> repeats
   // (conference sites prefix the title, e.g. "ECCV Poster <title>"), then og:title, then <title>.
@@ -254,6 +327,14 @@ export async function parsePage(html: string, baseUrl: string): Promise<Resolved
       res.title = cand;
       break;
     }
+  }
+
+  // Conference: citation metadata, reduced to a known venue when possible.
+  for (const key of ["citation_conference_title", "citation_journal_title"]) {
+    const raw = p.meta.get(key);
+    if (!raw) continue;
+    res.conference = venueFromText(raw) ?? (key === "citation_conference_title" ? raw.slice(0, MAX_VENUE) : null);
+    if (res.conference) break;
   }
 
   // arXiv id from any arxiv.org/abs|pdf link or citation metadata.
@@ -321,27 +402,36 @@ function looksGeneric(title: string): boolean {
 
 /** Best-effort title / PDF / arXiv id for a link. Never throws. */
 export async function resolve(url: string, arxivId: string | null = null): Promise<Resolved> {
-  let res: Resolved = { title: null, pdf_url: null, arxiv_id: arxivId };
+  let res: Resolved = { title: null, pdf_url: null, arxiv_id: arxivId, conference: venueFromUrl(url) };
   try {
     if (arxivId) {
       res.pdf_url = arxivPdf(arxivId); // deterministic: set before any network call can fail
-      res.title = await arxivTitle(arxivId);
+      const [title, venue] = await arxivInfo(arxivId);
+      res.title = title;
+      res.conference ??= venue;
       return res;
     }
 
     const words = scholarInboxSlugWords(url);
     if (words) {
       const hit = await arxivSearchTitle(words);
-      if (hit) return { arxiv_id: hit[0], title: hit[1], pdf_url: arxivPdf(hit[0]) };
+      if (hit) return { arxiv_id: hit[0], title: hit[1], pdf_url: arxivPdf(hit[0]), conference: res.conference ?? hit[2] };
     }
 
     const orPdf = openreviewPdf(url);
     if (orPdf) res.pdf_url = orPdf;
 
     const page = await parsePage(await get(url), url);
-    res = { title: page.title, pdf_url: page.pdf_url ?? res.pdf_url, arxiv_id: page.arxiv_id };
-    if (res.arxiv_id && (!res.title || looksGeneric(res.title))) {
-      res.title = (await arxivTitle(res.arxiv_id)) ?? res.title;
+    res = {
+      title: page.title,
+      pdf_url: page.pdf_url ?? res.pdf_url,
+      arxiv_id: page.arxiv_id,
+      conference: res.conference ?? page.conference ?? (page.pdf_url ? venueFromUrl(page.pdf_url) : null),
+    };
+    if (res.arxiv_id && (!res.title || looksGeneric(res.title) || !res.conference)) {
+      const [title, venue] = await arxivInfo(res.arxiv_id);
+      if (!res.title || looksGeneric(res.title)) res.title = title ?? res.title;
+      res.conference ??= venue;
     }
     return res;
   } catch {

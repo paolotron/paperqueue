@@ -61,7 +61,7 @@ def test_parse_html_title():
     assert parse_html_title(b"<title>Verifying your browser | OpenReview</title>") is None
 
 
-from paperqueue.links import openreview_pdf, parse_page, parse_arxiv_entries, scholar_inbox_slug_words
+from paperqueue.links import openreview_pdf, parse_page, parse_arxiv_entries, scholar_inbox_slug_words, venue_from_text, venue_from_url
 
 
 def test_openreview_pdf():
@@ -117,7 +117,68 @@ def test_scholar_inbox_slug():
 
 
 def test_parse_arxiv_entries_ids():
-    assert parse_arxiv_entries(ATOM) == [("1706.03762", "Attention Is All You Need")]
+    assert parse_arxiv_entries(ATOM) == [("1706.03762", "Attention Is All You Need", None)]
+
+
+ATOM_VENUE = b"""<feed xmlns="http://www.w3.org/2005/Atom" xmlns:arxiv="http://arxiv.org/schemas/atom">
+  <entry><id>http://arxiv.org/abs/2501.00001v1</id><title>A Paper</title>
+  <arxiv:comment>Accepted at CVPR 2025. Code: https://x.y</arxiv:comment></entry>
+  <entry><id>http://arxiv.org/abs/2501.00002v1</id><title>Another Paper</title>
+  <arxiv:journal_ref>NeurIPS'23</arxiv:journal_ref><arxiv:comment>ICML 2022 workshop</arxiv:comment></entry>
+</feed>"""
+
+
+def test_parse_arxiv_entries_venue():
+    assert parse_arxiv_entries(ATOM_VENUE) == [
+        ("2501.00001", "A Paper", "CVPR 2025"),
+        ("2501.00002", "Another Paper", "NeurIPS 2023"),
+    ]
+
+
+@pytest.mark.parametrize(
+    "text, expected",
+    [
+        ("Accepted at CVPR 2025", "CVPR 2025"),
+        ("NeurIPS'23", "NeurIPS 2023"),
+        ("ECCV2026", "ECCV 2026"),
+        ("In ICLR, 2024", "ICLR 2024"),
+        ("NIPS 2017", "NeurIPS 2017"),
+        ("SIGGRAPH Asia 2023", "SIGGRAPH Asia 2023"),
+        ("Proceedings of NAACL", "NAACL"),
+        ("a chi-squared test", None),
+        ("", None),
+    ],
+)
+def test_venue_from_text(text, expected):
+    assert venue_from_text(text) == expected
+
+
+@pytest.mark.parametrize(
+    "url, expected",
+    [
+        ("https://media.eventhosts.cc/Conferences/ECCV2026/pdfs/2253.pdf", "ECCV 2026"),
+        ("https://openaccess.thecvf.com/content/CVPR2024/html/X_CVPR_2024_paper.html", "CVPR 2024"),
+        ("https://proceedings.neurips.cc/paper_files/paper/2023/hash/abc-Abstract-Conference.html", "NeurIPS 2023"),
+        ("https://aclanthology.org/2024.acl-long.12/", "ACL 2024"),
+        ("https://www.scholar-inbox.com/paper/Foo2026CVPR_Some_Title", "CVPR 2026"),
+        ("https://eccv.ecva.net/virtual/2026/poster/3623", "ECCV 2026"),
+        ("https://neurips.cc/virtual/2023/poster/1", "NeurIPS 2023"),
+        ("https://www.example.org/virtual/2023/poster/1", None),
+        ("https://www.scholar-inbox.com/paper/Fu2026ARXIV_DeCAL", None),
+        ("https://example.com/paper.pdf", None),
+    ],
+)
+def test_venue_from_url(url, expected):
+    assert venue_from_url(url) == expected
+
+
+def test_parse_page_conference_meta():
+    page = b"""<html><head><meta name="citation_title" content="T T T">
+    <meta name="citation_conference_title" content="Proceedings of the IEEE/CVF Conference (CVPR 2024)"></head></html>"""
+    assert parse_page(page, "https://a.b").conference == "CVPR 2024"
+    other = b'<html><head><meta name="citation_conference_title" content="Some Workshop"></head></html>'
+    assert parse_page(other, "https://a.b").conference == "Some Workshop"
+    assert parse_page(b"<html><title>T</title></html>", "https://a.b").conference is None
 
 
 ABS_PAGE = b"""<html><head><title>[2609.12552] RelateAnything: Real-Time Open-Vocabulary Relation Prediction From Any Inputs</title>
