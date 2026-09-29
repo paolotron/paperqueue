@@ -4,9 +4,11 @@ from __future__ import annotations
 
 import argparse
 import sys
+import time
 from datetime import datetime
 
 from textual import events, work
+from textual.worker import get_current_worker
 from textual.app import App, ComposeResult
 from textual.binding import Binding
 from textual.reactive import reactive
@@ -20,6 +22,7 @@ from paperqueue.remote import RemoteError, RemoteStack
 from paperqueue.store import Paper, Stack
 
 POLL_SECONDS = 5
+BACKFILL_GAP_SECONDS = 4
 
 # The same palettes the web client offers, so both ports look like one app.
 THEMES = [
@@ -425,6 +428,7 @@ class PaperQueue(App[None]):
             for paper in self.stack:
                 if paper.needs_resolve:
                     self.resolve_paper(paper.url, paper.arxiv_id)
+            self.backfill_conferences([(p.url, p.arxiv_id) for p in self.stack.backfill_candidates()])
 
     @work(thread=True, group="poll", exclusive=True)
     def poll(self) -> None:
@@ -493,6 +497,26 @@ class PaperQueue(App[None]):
         res = links.resolve(url, arxiv_id)
         if res.title or res.pdf_url or res.arxiv_id or res.conference:
             self.call_from_thread(self._apply_resolved, url, res)
+
+    @work(thread=True, group="backfill", exclusive=True)
+    def backfill_conferences(self, papers: list[tuple[str, str | None]]) -> None:
+        """One conference-only lookup per older paper, spaced out for the arXiv API's rate limit."""
+        worker = get_current_worker()
+        for n, (url, arxiv_id) in enumerate(papers):
+            if n:
+                time.sleep(BACKFILL_GAP_SECONDS)
+            if worker.is_cancelled:
+                return
+            res = links.resolve(url, arxiv_id)
+            # No title and no venue means the lookup failed (e.g. throttled): retry on a later launch.
+            if res.title or res.conference:
+                self.call_from_thread(self._apply_backfill, url, res.conference)
+
+    def _apply_backfill(self, url: str, conference: str | None) -> None:
+        if self.stack.backfill_conference(url, conference):
+            self.stack.save()
+            if conference:
+                self.refresh_table()
 
     def _apply_resolved(self, url: str, res: links.Resolved) -> None:
         if self.stack.update(url, title=res.title, pdf_url=res.pdf_url, arxiv_id=res.arxiv_id, conference=res.conference):

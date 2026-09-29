@@ -34,6 +34,8 @@ class Paper:
     review_comment: str | None = None
     usefulness: float | None = None
     conference: str | None = None
+    # Venue detection has run for this paper (or the reader set it); the backfill skips it.
+    conference_checked: bool = False
 
     @property
     def read_url(self) -> str:
@@ -43,6 +45,10 @@ class Paper:
     @property
     def needs_resolve(self) -> bool:
         return self.pdf_url is None or self.title == self.url
+
+    @property
+    def needs_conference(self) -> bool:
+        return not self.conference and not self.conference_checked
 
     def __post_init__(self) -> None:
         if not self.title:
@@ -63,6 +69,7 @@ class Paper:
             review_comment=data.get("review_comment"),
             usefulness=data.get("usefulness"),
             conference=data.get("conference") or None,
+            conference_checked=data.get("conference_checked") is True,
         )
 
 
@@ -228,6 +235,26 @@ class Stack:
             paper.arxiv_id = arxiv_id
         if conference and not paper.conference:
             paper.conference = conference
+        if title or conference:  # the lookup answered, so the venue has been looked for
+            paper.conference_checked = True
+        return True
+
+    def backfill_candidates(self) -> list[Paper]:
+        """Papers from before the Conference column that still need their one venue lookup.
+
+        Queued papers still missing a title or PDF are left to the full resolution.
+        """
+        queued = [p for p in self._papers if p.needs_conference and not p.needs_resolve]
+        return queued + [p for p in self._history if p.needs_conference]
+
+    def backfill_conference(self, url: str, conference: str | None) -> bool:
+        """Record a conference-only lookup: fill an empty conference and mark it checked."""
+        paper = self.find(url) or self.find_history(url)
+        if paper is None:
+            return False
+        if conference and not paper.conference:
+            paper.conference = conference
+        paper.conference_checked = True
         return True
 
     def set_conference(self, url: str, conference: str) -> Paper | None:
@@ -235,6 +262,7 @@ class Stack:
         paper = self.find(url) or self.find_history(url)
         if paper is not None:
             paper.conference = conference.strip()[:MAX_CONFERENCE] or None
+            paper.conference_checked = True
         return paper
 
     def top_first(self) -> list[Paper]:

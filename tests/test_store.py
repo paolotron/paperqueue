@@ -156,3 +156,41 @@ def test_conference_is_filled_by_resolution_but_a_manual_value_wins(tmp_path: Pa
 
 def test_old_files_without_conference_load():
     assert Paper.from_dict({"url": "a"}).conference is None
+
+
+def test_conference_backfill_runs_once_per_paper_and_never_touches_other_fields(tmp_path: Path):
+    s = Stack(path=tmp_path / "s.json")
+    for url in ("done", "unresolved", "typed", "read"):
+        s.push(Paper(url=url, title=f"Title {url}", pdf_url=f"{url}.pdf"))
+    s.find("unresolved").pdf_url = None  # the full resolution will look for its venue
+    s.set_conference("typed", "ICML 2024")
+    s.find("done").conference_checked = True
+    s.take_bottom("read it", 3)  # "done" goes to history
+    s.pop("read it", 3)  # "read" goes to history
+    assert [p.url for p in s.backfill_candidates()] == ["read"]  # "done" checked, "unresolved" left to resolution
+    s.find_history("done").conference_checked = False
+    assert [p.url for p in s.backfill_candidates()] == ["done", "read"]
+
+    assert s.backfill_conference("read", "CVPR 2025")
+    assert s.backfill_conference("done", None)  # the lookup answered but found no venue
+    assert not s.backfill_conference("missing", "CVPR 2025")
+    assert s.backfill_candidates() == []
+    assert s.find_history("read").conference == "CVPR 2025"
+    assert s.find_history("read").title == "Title read"
+    assert s.find_history("done").conference is None
+
+    s.backfill_conference("typed", "NeurIPS 2023")
+    assert s.find("typed").conference == "ICML 2024"
+
+    s.save()
+    assert Stack.load(tmp_path / "s.json").backfill_candidates() == []
+
+
+def test_resolution_marks_the_conference_checked_only_when_it_answered():
+    s = Stack()
+    s.push(Paper(url="a"))
+    s.update("a", pdf_url="a.pdf")  # e.g. arXiv throttled: only the deterministic PDF came back
+    assert s.find("a").needs_conference
+    s.update("a", title="A real title")
+    assert not s.find("a").needs_conference
+    assert Paper.from_dict({"url": "b"}).needs_conference

@@ -12,6 +12,8 @@ export interface Paper {
   review_comment: string | null;
   usefulness: number | null;
   conference: string | null;
+  /** Venue detection has run for this paper (or the reader set it); the backfill skips it. */
+  conference_checked: boolean;
 }
 
 /** Same shape as the TUI's stack.json: papers bottom->top, history oldest->newest. */
@@ -34,11 +36,18 @@ export interface Review {
 const MAX_HISTORY = 500;
 const MAX_CONFERENCE = 80;
 const RETRY_MS = 10 * 60 * 1000;
+// Papers from before the Conference column get one conference-only lookup each, spaced
+// out so a big history does not trip the arXiv API's rate limit (one call per 3 s).
+const BACKFILL_GAP_MS = 4000;
 
 const now = () => new Date().toISOString().replace(/\.\d{3}Z$/, "+00:00");
 
 function needsResolve(p: Paper): boolean {
   return !p.pdf_url || p.title === p.url;
+}
+
+function needsConference(p: Paper): boolean {
+  return !p.conference && !p.conference_checked;
 }
 
 function cleanConference(value: unknown): string | null {
@@ -56,12 +65,14 @@ function coerce(raw: Partial<Paper> & { url: string }): Paper {
     review_comment: typeof raw.review_comment === "string" && raw.review_comment.trim() ? raw.review_comment.trim() : null,
     usefulness: typeof raw.usefulness === "number" && Number.isFinite(raw.usefulness) ? raw.usefulness : null,
     conference: cleanConference(raw.conference),
+    conference_checked: raw.conference_checked === true,
   };
 }
 
 export class PaperStack extends DurableObject<Env> {
   private state: State | null = null;
   private attempts = new Map<string, number>();
+  private lastBackfill = 0;
 
   private async load(): Promise<State> {
     if (!this.state) {
@@ -102,21 +113,44 @@ export class PaperStack extends DurableObject<Env> {
     this.ctx.waitUntil(this.resolveOne(paper.url, paper.arxiv_id));
   }
 
-  private async resolveOne(url: string, arxivId: string | null): Promise<void> {
-    const res = await resolve(url, arxivId);
-    await this.applyResolved(url, res);
+  /** Start the next conference-only lookup, at most one per BACKFILL_GAP_MS. */
+  private backfill(state: State): void {
+    if (Date.now() - this.lastBackfill < BACKFILL_GAP_MS) return;
+    const cutoff = Date.now() - RETRY_MS;
+    // Queued papers still missing a title or PDF get the full resolution, which detects the venue too.
+    const next = [...state.papers.filter((p) => !needsResolve(p)), ...state.history].find(
+      (p) => needsConference(p) && (this.attempts.get(p.url) ?? 0) < cutoff,
+    );
+    if (!next) return;
+    this.lastBackfill = Date.now();
+    this.attempts.set(next.url, Date.now());
+    this.ctx.waitUntil(this.resolveOne(next.url, next.arxiv_id, true));
   }
 
-  async applyResolved(url: string, res: Resolved): Promise<boolean> {
-    if (!res.title && !res.pdf_url && !res.arxiv_id && !res.conference) return false;
+  private async resolveOne(url: string, arxivId: string | null, conferenceOnly = false): Promise<void> {
+    const res = await resolve(url, arxivId);
+    await this.applyResolved(url, res, conferenceOnly);
+  }
+
+  /**
+   * Store what resolution found. conferenceOnly (the backfill) leaves title, PDF and arXiv id alone.
+   * A lookup that answered (a title or a venue came back) marks the conference as checked; a
+   * throttled or failed one leaves it for a retry.
+   */
+  async applyResolved(url: string, res: Resolved, conferenceOnly = false): Promise<boolean> {
+    const answered = !!(res.title || res.conference);
+    if (!answered && (conferenceOnly || (!res.pdf_url && !res.arxiv_id))) return false;
     const state = await this.load();
     const paper = state.papers.find((p) => p.url === url) ?? state.history.find((p) => p.url === url);
     if (!paper) return false;
-    if (res.title) paper.title = res.title;
-    if (res.pdf_url) paper.pdf_url = res.pdf_url;
-    if (res.arxiv_id) paper.arxiv_id = res.arxiv_id;
+    if (!conferenceOnly) {
+      if (res.title) paper.title = res.title;
+      if (res.pdf_url) paper.pdf_url = res.pdf_url;
+      if (res.arxiv_id) paper.arxiv_id = res.arxiv_id;
+    }
     // A conference the reader typed in wins over whatever the resolver guesses.
     if (res.conference && !paper.conference) paper.conference = res.conference;
+    if (answered) paper.conference_checked = true;
     await this.commit(state);
     return true;
   }
@@ -126,6 +160,7 @@ export class PaperStack extends DurableObject<Env> {
   async getState(): Promise<State> {
     const state = await this.load();
     for (const p of state.papers) if (needsResolve(p)) this.schedule(p);
+    this.backfill(state);
     return state;
   }
 
@@ -192,6 +227,7 @@ export class PaperStack extends DurableObject<Env> {
     const paper = state.papers.find((p) => p.url === url) ?? state.history.find((p) => p.url === url);
     if (!paper) return { paper: null, state };
     paper.conference = cleanConference(conference);
+    paper.conference_checked = true;
     return { paper, state: await this.commit(state) };
   }
 

@@ -68,6 +68,26 @@ describe("PaperStack", () => {
     expect((await s.restore("a")).paper?.conference).toBe("NeurIPS 2023");
   });
 
+  it("conference backfill: conference-only, checked once the lookup answers", async () => {
+    const s = fresh();
+    await s.push("a", null, false);
+    const none = { title: null, pdf_url: null, arxiv_id: null, conference: null };
+    await s.applyResolved("a", { ...none, title: "Original", pdf_url: "a.pdf" });
+    const paper = async () => (await s.getState()).papers[0];
+    expect((await paper()).conference_checked).toBe(true);
+
+    await s.pop(review);
+    const hist0 = async () => (await s.getState()).history[0];
+    expect(await s.applyResolved("a", { ...none, pdf_url: "x.pdf" }, true)).toBe(false); // throttled: retry later
+    expect(await s.applyResolved("a", { ...none, title: "Other", pdf_url: "b.pdf", conference: "CVPR 2025" }, true)).toBe(true);
+    expect(await hist0()).toMatchObject({ title: "Original", pdf_url: "a.pdf", conference: "CVPR 2025", conference_checked: true });
+
+    await s.push("b", null, false);
+    await s.applyResolved("b", { ...none, pdf_url: "b.pdf", arxiv_id: "2501.00001" });
+    expect((await s.getState()).papers[0].conference_checked).toBe(false);
+    expect((await s.setConference("b", "")).paper?.conference_checked).toBe(true);
+  });
+
   it("import merges without duplicating", async () => {
     const s = fresh();
     await s.push("a", null, false);
