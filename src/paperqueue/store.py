@@ -12,6 +12,7 @@ from typing import Iterator
 
 
 MAX_CONFERENCE = 80
+MAX_TITLE = 300
 
 
 def default_path() -> Path:
@@ -36,6 +37,8 @@ class Paper:
     conference: str | None = None
     # Venue detection has run for this paper (or the reader set it); the backfill skips it.
     conference_checked: bool = False
+    # The reader renamed the paper; resolution no longer touches the title.
+    title_edited: bool = False
 
     @property
     def read_url(self) -> str:
@@ -70,6 +73,7 @@ class Paper:
             usefulness=data.get("usefulness"),
             conference=data.get("conference") or None,
             conference_checked=data.get("conference_checked") is True,
+            title_edited=data.get("title_edited") is True,
         )
 
 
@@ -223,11 +227,12 @@ class Stack:
         arxiv_id: str | None = None,
         conference: str | None = None,
     ) -> bool:
-        """Apply resolved metadata. Returns False if the paper is gone. Never overwrites a conference already set."""
+        """Apply resolved metadata. Returns False if the paper is gone. Never overwrites a
+        title or conference the reader set."""
         paper = self.find(url)
         if paper is None:
             return False
-        if title:
+        if title and not paper.title_edited:
             paper.title = title
         if pdf_url:
             paper.pdf_url = pdf_url
@@ -263,6 +268,15 @@ class Stack:
         if paper is not None:
             paper.conference = conference.strip()[:MAX_CONFERENCE] or None
             paper.conference_checked = True
+        return paper
+
+    def set_title(self, url: str, title: str) -> Paper | None:
+        """Rename a queued or read paper. An empty title leaves it unchanged."""
+        paper = self.find(url) or self.find_history(url)
+        title = title.strip()[:MAX_TITLE]
+        if paper is not None and title:
+            paper.title = title
+            paper.title_edited = True
         return paper
 
     def top_first(self) -> list[Paper]:

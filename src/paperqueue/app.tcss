@@ -50,7 +50,7 @@ DataTable > .datatable--cursor {
     color: $text-muted;
 }
 
-ReviewScreen, ConferenceScreen {
+ReviewScreen, EditFieldScreen {
     align: center middle;
 }
 
@@ -104,17 +104,17 @@ ReviewScreen, ConferenceScreen {
     margin-bottom: 2;
 }
 
-#conference-title, #conference-input, ConferenceScreen > .review-hint {
+#edit-title, #edit-input, EditFieldScreen > .review-hint {
     margin-left: 4;
     margin-right: 4;
     width: 1fr;
 }
 
-#conference-title {
+#edit-title {
     margin-top: 2;
     text-style: bold;
 }
 
-#conference-input {
+#edit-input {
     border: heavy $foreground;
 }

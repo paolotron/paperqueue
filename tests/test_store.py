@@ -194,3 +194,23 @@ def test_resolution_marks_the_conference_checked_only_when_it_answered():
     s.update("a", title="A real title")
     assert not s.find("a").needs_conference
     assert Paper.from_dict({"url": "b"}).needs_conference
+
+
+def test_rename_sticks_through_resolution(tmp_path: Path):
+    s = Stack(path=tmp_path / "s.json")
+    s.push(Paper(url="a"))
+    assert s.set_title("a", "  My name  ").title == "My name"
+    s.update("a", title="Resolved title", pdf_url="a.pdf")
+    assert s.find("a").title == "My name"
+    assert s.find("a").pdf_url == "a.pdf"
+    assert s.set_title("a", "   ").title == "My name"  # empty keeps the title
+
+    s.pop("read it", 3)
+    assert s.set_title("a", "Renamed later").title == "Renamed later"  # history too
+    assert s.set_title("missing", "x") is None
+    s.save()
+    assert Stack.load(tmp_path / "s.json").find_history("a").title_edited
+
+
+def test_old_files_without_title_edited_load():
+    assert Paper.from_dict({"url": "a"}).title_edited is False

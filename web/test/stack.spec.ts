@@ -88,6 +88,20 @@ describe("PaperStack", () => {
     expect((await s.setConference("b", "")).paper?.conference_checked).toBe(true);
   });
 
+  it("rename: sticks through resolution, empty keeps it, history is editable", async () => {
+    const s = fresh();
+    await s.push("a", null, false);
+    expect((await s.setTitle("a", "  My name  ")).paper?.title).toBe("My name");
+    await s.applyResolved("a", { title: "Resolved", pdf_url: "a.pdf", arxiv_id: null, conference: null });
+    const p = (await s.getState()).papers[0];
+    expect(p.title).toBe("My name");
+    expect(p.pdf_url).toBe("a.pdf");
+    expect((await s.setTitle("a", "   ")).paper?.title).toBe("My name");
+    await s.pop(review);
+    expect((await s.setTitle("a", "Later")).paper?.title).toBe("Later");
+    expect((await s.setTitle("missing", "x")).paper).toBeNull();
+  });
+
   it("import merges without duplicating", async () => {
     const s = fresh();
     await s.push("a", null, false);
@@ -140,6 +154,10 @@ describe("HTTP API", () => {
     expect(((await conf.json()) as { paper: { conference: string } }).paper.conference).toBe("NeurIPS 2017");
     expect((await SELF.fetch("https://pq/api/papers", patchBody({ url: "https://arxiv.org/abs/1706.03762" }))).status).toBe(400);
     expect((await SELF.fetch("https://pq/api/papers", patchBody({ url: "nope", conference: "x" }))).status).toBe(404);
+    const renamed = await SELF.fetch("https://pq/api/papers", patchBody({ url: "https://arxiv.org/abs/1706.03762", title: "Transformers" }));
+    expect(renamed.status).toBe(200);
+    expect(((await renamed.json()) as { paper: { title: string } }).paper.title).toBe("Transformers");
+    expect((await SELF.fetch("https://pq/api/papers", patchBody({ url: "nope", title: "x" }))).status).toBe(404);
 
     const restore = await SELF.fetch("https://pq/api/history/restore", { method: "POST", headers: auth, body: JSON.stringify({ url: "https://arxiv.org/abs/1706.03762" }) });
     expect(restore.status).toBe(200);

@@ -79,7 +79,11 @@ class FakeServer:
             p = next((p for p in papers + history if p["url"] == body["url"]), None)
             if not p:
                 return 404, {"paper": None, "state": self.state}
-            p["conference"] = body["conference"].strip() or None; self.bump()
+            if "title" in body and body["title"].strip():
+                p["title"] = body["title"].strip(); p["title_edited"] = True
+            if "conference" in body:
+                p["conference"] = body["conference"].strip() or None
+            self.bump()
             return 200, {"paper": p, "state": self.state}
         if path == "/api/boom":
             return 500, {"error": "kaboom"}
@@ -139,6 +143,9 @@ def test_remote_stack_round_trip(server):
     assert rs.set_conference("a", " CVPR 2025 ").conference == "CVPR 2025"
     assert rs.find_history("a").conference == "CVPR 2025"
     assert rs.set_conference("zzz", "ICML") is None
+    assert rs.set_title("a", " Attention ").title == "Attention"
+    assert rs.find_history("a").title_edited
+    assert rs.set_title("zzz", "x") is None
     assert rs.restore("a").url == "a"
     assert [p.url for p in rs.top_first()] == ["a"]
     assert rs.remove("a").url == "a"

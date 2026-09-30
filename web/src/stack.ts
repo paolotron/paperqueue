@@ -14,6 +14,8 @@ export interface Paper {
   conference: string | null;
   /** Venue detection has run for this paper (or the reader set it); the backfill skips it. */
   conference_checked: boolean;
+  /** The reader renamed the paper; resolution no longer touches the title. */
+  title_edited: boolean;
 }
 
 /** Same shape as the TUI's stack.json: papers bottom->top, history oldest->newest. */
@@ -35,6 +37,7 @@ export interface Review {
 
 const MAX_HISTORY = 500;
 const MAX_CONFERENCE = 80;
+const MAX_TITLE = 300;
 const RETRY_MS = 10 * 60 * 1000;
 // Papers from before the Conference column get one conference-only lookup each, spaced
 // out so a big history does not trip the arXiv API's rate limit (one call per 3 s).
@@ -66,6 +69,7 @@ function coerce(raw: Partial<Paper> & { url: string }): Paper {
     usefulness: typeof raw.usefulness === "number" && Number.isFinite(raw.usefulness) ? raw.usefulness : null,
     conference: cleanConference(raw.conference),
     conference_checked: raw.conference_checked === true,
+    title_edited: raw.title_edited === true,
   };
 }
 
@@ -144,7 +148,7 @@ export class PaperStack extends DurableObject<Env> {
     const paper = state.papers.find((p) => p.url === url) ?? state.history.find((p) => p.url === url);
     if (!paper) return false;
     if (!conferenceOnly) {
-      if (res.title) paper.title = res.title;
+      if (res.title && !paper.title_edited) paper.title = res.title;
       if (res.pdf_url) paper.pdf_url = res.pdf_url;
       if (res.arxiv_id) paper.arxiv_id = res.arxiv_id;
     }
@@ -228,6 +232,18 @@ export class PaperStack extends DurableObject<Env> {
     if (!paper) return { paper: null, state };
     paper.conference = cleanConference(conference);
     paper.conference_checked = true;
+    return { paper, state: await this.commit(state) };
+  }
+
+  /** Rename a queued or read paper. An empty title leaves it unchanged. */
+  async setTitle(url: string, title: string): Promise<Mutation> {
+    const state = await this.load();
+    const paper = state.papers.find((p) => p.url === url) ?? state.history.find((p) => p.url === url);
+    if (!paper) return { paper: null, state };
+    const clean = title.trim().slice(0, MAX_TITLE);
+    if (!clean) return { paper, state };
+    paper.title = clean;
+    paper.title_edited = true;
     return { paper, state: await this.commit(state) };
   }
 

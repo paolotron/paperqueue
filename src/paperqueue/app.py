@@ -235,19 +235,23 @@ class ReviewDetailsScreen(ModalScreen[None]):
             self.action_close()
 
 
-class ConferenceScreen(ModalScreen[str | None]):
-    """Edit a paper's conference. Enter saves (empty clears), Esc cancels."""
+class EditFieldScreen(ModalScreen[str | None]):
+    """Edit one text field of a paper. Enter saves, Esc cancels."""
 
     BINDINGS = [Binding("escape", "cancel", "Cancel")]
 
-    def __init__(self, paper: Paper) -> None:
+    def __init__(self, label: str, paper: Paper, value: str, placeholder: str, hint: str) -> None:
         super().__init__()
+        self.label = label
         self.paper = paper
+        self.value = value
+        self.placeholder = placeholder
+        self.hint = hint
 
     def compose(self) -> ComposeResult:
-        yield Static(f"Conference: {self.paper.title}", id="conference-title")
-        yield Input(value=self.paper.conference or "", placeholder="e.g. CVPR 2025", id="conference-input")
-        yield Static("Enter saves, an empty value clears it. Esc cancels.", classes="review-hint")
+        yield Static(f"{self.label}: {self.paper.title}", id="edit-title")
+        yield Input(value=self.value, placeholder=self.placeholder, id="edit-input")
+        yield Static(self.hint, classes="review-hint")
 
     def on_mount(self) -> None:
         self.query_one(Input).focus()
@@ -260,21 +264,43 @@ class ConferenceScreen(ModalScreen[str | None]):
         self.dismiss(None)
 
 
-def edit_conference(screen: Screen, stack: Stack | RemoteStack, paper: Paper, refresh) -> None:
-    """Open the conference editor for a paper; both the stack and history screens use it."""
-
+def _edit_field(screen: Screen, editor: EditFieldScreen, save, refresh) -> None:
     def done(value: str | None) -> None:
         if value is None:
             return
         try:
-            stack.set_conference(paper.url, value)
+            save(value)
         except RemoteError as exc:
             screen.notify(str(exc), severity="error")
             return
-        stack.save()
         refresh()
 
-    screen.app.push_screen(ConferenceScreen(paper), done)
+    screen.app.push_screen(editor, done)
+
+
+def edit_conference(screen: Screen, stack: Stack | RemoteStack, paper: Paper, refresh) -> None:
+    """Open the conference editor for a paper; both the stack and history screens use it."""
+
+    def save(value: str) -> None:
+        stack.set_conference(paper.url, value)
+        stack.save()
+
+    editor = EditFieldScreen(
+        "Conference", paper, paper.conference or "", "e.g. CVPR 2025",
+        "Enter saves, an empty value clears it. Esc cancels.",
+    )
+    _edit_field(screen, editor, save, refresh)
+
+
+def rename_paper(screen: Screen, stack: Stack | RemoteStack, paper: Paper, refresh) -> None:
+    """Open the title editor for a paper; both the stack and history screens use it."""
+
+    def save(value: str) -> None:
+        stack.set_title(paper.url, value)
+        stack.save()
+
+    editor = EditFieldScreen("Rename", paper, paper.title, "Paper title", "Enter saves. Esc cancels.")
+    _edit_field(screen, editor, save, refresh)
 
 
 class HistoryScreen(Screen[None]):
@@ -284,6 +310,7 @@ class HistoryScreen(Screen[None]):
         Binding("i", "review", "View review"),
         Binding("r,enter", "restore", "Re-add to stack"),
         Binding("c", "conference", "Conference"),
+        Binding("e", "rename", "Rename"),
         Binding("o", "open", "Open PDF"),
         Binding("x", "forget", "Forget"),
         Binding("escape,h,q", "app.pop_screen", "Back"),
@@ -365,6 +392,11 @@ class HistoryScreen(Screen[None]):
         if paper is not None:
             edit_conference(self, self.stack, paper, self.refresh_table)
 
+    def action_rename(self) -> None:
+        paper = self._highlighted()
+        if paper is not None:
+            rename_paper(self, self.stack, paper, self.refresh_table)
+
     def action_forget(self) -> None:
         paper = self._highlighted()
         if paper is None:
@@ -388,6 +420,7 @@ class PaperQueue(App[None]):
         Binding("O", "peek_page", "Open page", key_display="O"),
         Binding("d", "delete", "Delete"),
         Binding("c", "conference", "Conference"),
+        Binding("e", "rename", "Rename"),
         Binding("a", "focus_input", "Add"),
         Binding("h", "history", "History"),
         Binding("t", "cycle_theme", "Theme"),
@@ -596,6 +629,13 @@ class PaperQueue(App[None]):
             self.notify("Nothing selected", severity="warning")
             return
         edit_conference(self.screen, self.stack, paper, self.refresh_table)
+
+    def action_rename(self) -> None:
+        paper = self._highlighted()
+        if paper is None:
+            self.notify("Nothing selected", severity="warning")
+            return
+        rename_paper(self.screen, self.stack, paper, self.refresh_table)
 
     def action_cycle_theme(self) -> None:
         """Cycle the palettes, mirroring `t` in the web client."""

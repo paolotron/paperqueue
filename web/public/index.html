@@ -380,12 +380,12 @@
     <button type="submit">Save review and mark as read</button>
   </form>
 </dialog>
-<dialog id="conferenceDialog">
-  <form id="conferenceForm">
-    <strong>Conference</strong>
-    <div id="conferenceTitle" class="hint"></div>
-    <input id="conference" type="text" maxlength="80" autocomplete="off" placeholder="e.g. CVPR 2025">
-    <div class="hint">Leave empty to clear. Esc cancels.</div>
+<dialog id="editDialog">
+  <form id="editForm">
+    <strong id="editLabel"></strong>
+    <div id="editTitle" class="hint"></div>
+    <input id="editValue" type="text" autocomplete="off">
+    <div id="editHint" class="hint"></div>
     <button type="submit">Save</button>
   </form>
 </dialog>
@@ -897,6 +897,7 @@
       ["O", "Open page", () => openHighlighted(true), "Page"],
       ["d", "Delete", () => del(), "Del"],
       ["c", "Conference", () => editConference(), "Conf"],
+      ["e", "Rename", () => rename(), "Rename"],
       ["a", "Add", () => $("link").focus(), "Add"],
       ["h", "History", () => show("history"), "Hist"],
     ],
@@ -904,6 +905,7 @@
       ["i", "View review", () => openReview(), "Review"],
       ["r", "Re-add to stack", () => restore(), "Re-add"],
       ["c", "Conference", () => editConference(), "Conf"],
+      ["e", "Rename", () => rename(), "Rename"],
       ["o", "Open PDF", () => openHighlighted(false), "Open"],
       ["x", "Forget", () => forget(), "Forget"],
       ["esc", "Back", () => show("main"), "Back"],
@@ -998,21 +1000,39 @@
     if (!p || screen !== "history") return;
     mutate("DELETE", "/api/history?url=" + encodeURIComponent(p.url), null, "Forgotten: " + p.title);
   }
+  // One dialog edits any single text field; `editing` holds the paper and what to do with the value.
   let editing = null;
+  function editField(paper, label, value, { placeholder, hint, maxLength, save }) {
+    editing = { paper, save };
+    $("editLabel").textContent = label;
+    $("editTitle").textContent = paper.title || paper.url;
+    $("editValue").value = value;
+    $("editValue").placeholder = placeholder;
+    $("editValue").maxLength = maxLength;
+    $("editHint").textContent = hint;
+    $("editDialog").showModal();
+    $("editValue").select();
+  }
+  async function saveEdit() {
+    if (!editing) return;
+    const { paper, save } = editing, value = $("editValue").value.trim();
+    $("editDialog").close();
+    editing = null;
+    await save(paper, value);
+  }
   function editConference(paper = highlighted()) {
     if (!paper) return;
-    editing = paper;
-    $("conferenceTitle").textContent = paper.title || paper.url;
-    $("conference").value = paper.conference || "";
-    $("conferenceDialog").showModal();
-    $("conference").select();
+    editField(paper, "Conference", paper.conference || "", {
+      placeholder: "e.g. CVPR 2025", hint: "Leave empty to clear. Esc cancels.", maxLength: 80,
+      save: (p, conference) => mutate("PATCH", "/api/papers", { url: p.url, conference }, conference ? "Conference: " + conference : "Conference cleared"),
+    });
   }
-  async function saveConference() {
-    if (!editing) return;
-    const p = editing, conference = $("conference").value.trim();
-    $("conferenceDialog").close();
-    editing = null;
-    await mutate("PATCH", "/api/papers", { url: p.url, conference }, conference ? "Conference: " + conference : "Conference cleared");
+  function rename(paper = highlighted()) {
+    if (!paper) return;
+    editField(paper, "Rename", paper.title || paper.url, {
+      placeholder: "Paper title", hint: "Esc cancels.", maxLength: 300,
+      save: (p, title) => title && title !== p.title ? mutate("PATCH", "/api/papers", { url: p.url, title }, "Renamed: " + title) : undefined,
+    });
   }
   function openReview(paper = highlighted()) {
     if (!paper || screen !== "history") return;
@@ -1038,7 +1058,7 @@
 
   // ---- keyboard (mirrors the TUI bindings) --------------------------------
   document.addEventListener("keydown", (e) => {
-    if ($("tokenDialog").open || $("reviewDialog").open || $("reviewViewDialog").open || $("conferenceDialog").open) return;
+    if ($("tokenDialog").open || $("reviewDialog").open || $("reviewViewDialog").open || $("editDialog").open) return;
     if (document.activeElement === $("link")) {
       if (e.key === "Enter") { e.preventDefault(); add($("link").value); }
       else if (e.key === "Escape") { e.preventDefault(); $("link").blur(); }
@@ -1055,6 +1075,7 @@
     if (k === "t") { e.preventDefault(); return cycleTheme(1); }
     if (k === "T") { e.preventDefault(); return cycleTheme(-1); }
     if (k === "c") { e.preventDefault(); return editConference(); }
+    if (k === "e") { e.preventDefault(); return rename(); }
     if (screen === "history") {
       if (k === "i") { e.preventDefault(); return openReview(); }
       if (k === "r" || k === "Enter") { e.preventDefault(); return restore(); }
@@ -1085,8 +1106,8 @@
   });
   $("reviewForm").addEventListener("submit", (e) => { e.preventDefault(); submitReview(); });
   $("reviewDialog").addEventListener("cancel", (e) => e.preventDefault());
-  $("conferenceForm").addEventListener("submit", (e) => { e.preventDefault(); saveConference(); });
-  $("conferenceDialog").addEventListener("close", () => { editing = null; });
+  $("editForm").addEventListener("submit", (e) => { e.preventDefault(); saveEdit(); });
+  $("editDialog").addEventListener("close", () => { editing = null; });
   $("usefulness").addEventListener("input", () => { $("reviewValue").value = $("usefulness").value; });
   $("header").addEventListener("dblclick", askToken);
 
