@@ -214,3 +214,13 @@ def test_rename_sticks_through_resolution(tmp_path: Path):
 
 def test_old_files_without_title_edited_load():
     assert Paper.from_dict({"url": "a"}).title_edited is False
+
+
+def test_review_completes_the_opened_paper_even_after_papers_are_added():
+    s = Stack()
+    s.push(Paper(url="a"))
+    s.push(Paper(url="b"))
+    s.push(Paper(url="new"))  # added while the review of "b" was pending
+    assert s.pop("Solid", 4, expected_url="b").url == "b"
+    assert [p.url for p in s] == ["a", "new"]
+    assert s.pop("Gone", 1, expected_url="b") is None

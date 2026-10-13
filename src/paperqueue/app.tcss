@@ -50,18 +50,23 @@ DataTable > .datatable--cursor {
     color: $text-muted;
 }
 
-ReviewScreen, EditFieldScreen {
+EditFieldScreen {
     align: center middle;
 }
 
-#review-title, #review-comment, #review-usefulness, .review-hint, #review-save, ReviewScreen > Static {
+#review {
+    height: 1fr;
+    overflow-y: auto;
+}
+
+#review-title, #review-comment, #review-usefulness, .review-hint, #review-save, ReviewPanel > Static {
     margin-left: 4;
     margin-right: 4;
     width: 1fr;
 }
 
 #review-title {
-    margin-top: 2;
+    margin-top: 1;
     text-style: bold;
 }
 

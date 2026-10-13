@@ -182,10 +182,16 @@ export class PaperStack extends DurableObject<Env> {
     return { ok: true, paper, state: next };
   }
 
+  /** The paper opened for reading may no longer be at the end it was taken from: papers can be added during the review. */
+  private take(state: State, expectedUrl: string | undefined, atEnd: () => Paper | undefined): Paper | undefined {
+    if (!expectedUrl) return atEnd();
+    const idx = state.papers.findIndex((p) => p.url === expectedUrl);
+    return idx < 0 ? undefined : state.papers.splice(idx, 1)[0];
+  }
+
   async pop(review: Review, expectedUrl?: string): Promise<Mutation> {
     const state = await this.load();
-    if (expectedUrl && state.papers.at(-1)?.url !== expectedUrl) return { paper: null, state };
-    const paper = state.papers.pop();
+    const paper = this.take(state, expectedUrl, () => state.papers.pop());
     if (!paper) return { paper: null, state };
     this.archive(state, paper, review);
     return { paper, state: await this.commit(state) };
@@ -193,8 +199,7 @@ export class PaperStack extends DurableObject<Env> {
 
   async takeBottom(review: Review, expectedUrl?: string): Promise<Mutation> {
     const state = await this.load();
-    if (expectedUrl && state.papers[0]?.url !== expectedUrl) return { paper: null, state };
-    const paper = state.papers.shift();
+    const paper = this.take(state, expectedUrl, () => state.papers.shift());
     if (!paper) return { paper: null, state };
     this.archive(state, paper, review);
     return { paper, state: await this.commit(state) };

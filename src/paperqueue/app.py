@@ -11,6 +11,8 @@ from textual import events, work
 from textual.worker import get_current_worker
 from textual.app import App, ComposeResult
 from textual.binding import Binding
+from textual.containers import Vertical
+from textual.message import Message
 from textual.reactive import reactive
 from textual.screen import ModalScreen, Screen
 from textual.theme import Theme
@@ -179,13 +181,22 @@ class UsefulnessSlider(Static):
         self.set_value(5 * event.x / max(1, self.size.width - 1))
 
 
-class ReviewScreen(ModalScreen[tuple[str, float]]):
-    """The required reflection that completes a paper reading."""
+class ReviewPanel(Vertical):
+    """The required reflection that completes a paper reading.
+
+    Lives inside the main screen rather than in a modal, so the link input above it stays usable.
+    """
 
     BINDINGS = [Binding("ctrl+enter", "submit", "Save review")]
 
+    class Submitted(Message):
+        def __init__(self, comment: str, usefulness: float) -> None:
+            super().__init__()
+            self.comment = comment
+            self.usefulness = usefulness
+
     def __init__(self, paper: Paper) -> None:
-        super().__init__()
+        super().__init__(id="review")
         self.paper = paper
 
     def compose(self) -> ComposeResult:
@@ -193,7 +204,7 @@ class ReviewScreen(ModalScreen[tuple[str, float]]):
         yield Static("Comment (required)")
         yield TextArea(placeholder="What did you take from it?", id="review-comment")
         yield UsefulnessSlider(id="review-usefulness")
-        yield Static("Use ←/→ or click the slider. Ctrl+Enter saves the review.", classes="review-hint")
+        yield Static("Use ←/→ or click the slider. Ctrl+Enter saves the review. Tab reaches the link input.", classes="review-hint")
         yield Button("Save review and mark as read", id="review-save", variant="primary")
 
     def on_mount(self) -> None:
@@ -205,7 +216,7 @@ class ReviewScreen(ModalScreen[tuple[str, float]]):
             self.notify("A review comment is required", severity="error")
             self.query_one(TextArea).focus()
             return
-        self.dismiss((comment, self.query_one(UsefulnessSlider).value))
+        self.post_message(self.Submitted(comment, self.query_one(UsefulnessSlider).value))
 
     def on_button_pressed(self, event: Button.Pressed) -> None:
         if event.button.id == "review-save":
@@ -431,6 +442,7 @@ class PaperQueue(App[None]):
         super().__init__()
         self.stack = stack
         self._problem: str | None = None
+        self._reviewing: tuple[str, str] | None = None  # (where, url) of the paper under review
 
     # -- layout ------------------------------------------------------------
 
@@ -440,6 +452,7 @@ class PaperQueue(App[None]):
         yield DitherBand()
         yield DataTable(id="stack", cursor_type="row", zebra_stripes=True)
         yield Static("Stack is empty. Paste a link above.", id="empty")
+        # the review panel is mounted here while a reading is awaiting its review
         yield Footer()
 
     def on_mount(self) -> None:
@@ -489,8 +502,8 @@ class PaperQueue(App[None]):
         for i, paper in enumerate(papers, start=1):
             pdf = "yes" if paper.pdf_url else "-"
             table.add_row(str(i), paper.title, paper.conference or "—", pdf, _fmt_added(paper.added_at), key=paper.url)
-        table.display = bool(papers)
-        empty.display = not papers
+        table.display = bool(papers) and not self._reviewing
+        empty.display = not papers and not self._reviewing
         if papers:
             table.move_cursor(row=min(cursor, len(papers) - 1))
         main.query_one(DitherBand).paint(len(papers))
@@ -502,7 +515,8 @@ class PaperQueue(App[None]):
     def on_input_submitted(self, event: Input.Submitted) -> None:
         text = event.value.strip()
         if not text:
-            self.query_one(DataTable).focus()
+            if not self._reviewing:
+                self.query_one(DataTable).focus()
             return
         try:
             url, arxiv_id = links.normalize(text)
@@ -564,11 +578,29 @@ class PaperQueue(App[None]):
             self.notify("Stack is empty", severity="warning")
             return
         opener.open_url(paper.read_url)
-        self.push_screen(ReviewScreen(paper), lambda review: self._complete_read(where, paper.url, review))
+        self._reviewing = (where, paper.url)
+        self.refresh_table()
+        self.mount(ReviewPanel(paper), before=self.query_one(Footer))
 
-    def _complete_read(self, where: str, expected_url: str, review: tuple[str, float] | None) -> None:
-        if review is None:
+    def on_review_panel_submitted(self, message: ReviewPanel.Submitted) -> None:
+        if self._reviewing is None:
             return
+        where, expected_url = self._reviewing
+        self._reviewing = None
+        self.query_one(ReviewPanel).remove()
+        self.refresh_table()
+        self.query_one(DataTable).focus()
+        self._complete_read(where, expected_url, (message.comment, message.usefulness))
+
+    def check_action(self, action: str, parameters: tuple[object, ...]) -> bool | None:
+        # The table is hidden while a review is pending; keep its actions from acting on it unseen.
+        if self._reviewing and action in {
+            "pop_top", "take_bottom", "peek", "peek_page", "delete", "conference", "rename", "history",
+        }:
+            return False
+        return True
+
+    def _complete_read(self, where: str, expected_url: str, review: tuple[str, float]) -> None:
         comment, usefulness = review
         try:
             paper = self.stack.pop(comment, usefulness, expected_url) if where == "top" else self.stack.take_bottom(comment, usefulness, expected_url)
@@ -652,7 +684,7 @@ class PaperQueue(App[None]):
         self.push_screen(HistoryScreen(self.stack))
 
     def on_key(self, event) -> None:
-        if event.key == "escape" and self.query_one(Input).has_focus:
+        if event.key == "escape" and self.query_one(Input).has_focus and not self._reviewing:
             table = self.query_one(DataTable)
             if table.display:
                 table.focus()

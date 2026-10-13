@@ -162,16 +162,24 @@ class Stack:
     def pop(self, comment: str, usefulness: float, expected_url: str | None = None) -> Paper | None:
         """Complete the top paper's required review and move it into history."""
         review = self._review(comment, usefulness)
-        if expected_url is not None and (not self._papers or self._papers[-1].url != expected_url):
-            return None
+        if expected_url is not None:
+            return self._complete(expected_url, review)
         return self._archive(self._papers.pop() if self._papers else None, review)
 
     def take_bottom(self, comment: str, usefulness: float, expected_url: str | None = None) -> Paper | None:
         """Complete the bottom paper's required review and move it into history."""
         review = self._review(comment, usefulness)
-        if expected_url is not None and (not self._papers or self._papers[0].url != expected_url):
-            return None
+        if expected_url is not None:
+            return self._complete(expected_url, review)
         return self._archive(self._papers.pop(0) if self._papers else None, review)
+
+    def _complete(self, url: str, review) -> Paper | None:
+        """Archive the paper that was opened for reading, wherever it sits now: papers may be added during the review."""
+        paper = self.find(url)
+        if paper is None:
+            return None
+        self._papers.remove(paper)
+        return self._archive(paper, review)
 
     def remove(self, url: str) -> Paper | None:
         paper = self.find(url)
