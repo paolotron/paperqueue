@@ -631,7 +631,9 @@ class PaperQueue(App[None]):
             self.notify(str(exc), severity="error")
             return
         if paper is None:
-            self.notify("That paper is no longer in this position", severity="warning")
+            # Removed elsewhere (another device, the web page) while the review was open.
+            self.refresh_table()
+            self.notify("That paper is no longer on the stack; nothing was moved to history", severity="warning")
             return
         self.stack.save()
         self.refresh_table()
@@ -707,7 +709,11 @@ class PaperQueue(App[None]):
         self.push_screen(HistoryScreen(self.stack))
 
     def on_key(self, event) -> None:
-        if event.key == "escape" and self.query_one(Input).has_focus and not self._reviewing:
+        if event.key == "escape" and self.query_one(Input).has_focus:
+            if self._reviewing:
+                # The list is hidden during a review; Esc goes back to the review instead.
+                self.query_one("#review-comment", TextArea).focus()
+                return
             table = self.query_one(DataTable)
             if table.display:
                 table.focus()

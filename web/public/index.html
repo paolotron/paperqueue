@@ -468,7 +468,7 @@
     for (let i = 0; i < s.length; i++) { h ^= s.charCodeAt(i); h = Math.imul(h, 0x01000193); }
     return h >>> 0;
   }
-  const rand01 = (key, salt) => hash32(salt + " " + key) / 4294967296;
+  const rand01 = (key, salt) => hash32(salt + "\0" + key) / 4294967296;
   const pct = (x) => (x * 100).toFixed(4) + "%";
 
   // ---- API ----------------------------------------------------------------
@@ -753,7 +753,7 @@
         // Geometry depends on which papers are shown, never on their titles: the
         // Worker resolves titles in the background and must not move a single line.
         const sig = page + "|" + slice.length + "|" + Math.round(aspect * 20) + "|"
-                  + slice.map((p) => p.url).join("");
+                  + slice.map((p) => p.url).join("\x01");
         if (!MONDRIAN.cache || MONDRIAN.cache.sig !== sig) {
           const shares = areaShares(slice.length);
           const items = slice.map((p, k) => ({ key: p.url, i: start + k, share: shares[k] }));

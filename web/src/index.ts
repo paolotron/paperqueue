@@ -104,11 +104,12 @@ async function api(request: Request, env: Env, stub: DurableObjectStub<PaperStac
   }
   if (method === "POST" && path === "/api/import") {
     const body = await readJson(request);
+    const { papers = [], history = [] } = body;
+    if (!("papers" in body || "history" in body) || !Array.isArray(papers) || !Array.isArray(history)) {
+      throw new BadRequest("expected {papers, history} arrays");
+    }
     const r = await stub.importState(
-      {
-        papers: Array.isArray(body.papers) ? (body.papers as never[]) : [],
-        history: Array.isArray(body.history) ? (body.history as never[]) : [],
-      },
+      { papers: papers as never[], history: history as never[] },
       doResolve,
     );
     return json(r);

@@ -170,4 +170,12 @@ describe("HTTP API", () => {
     expect(state.papers).toEqual([]);
     expect(state.history).toEqual([]);
   });
+
+  it("rejects an import body without papers or history arrays", async () => {
+    const post = (body: string) => SELF.fetch("https://pq/api/import", { method: "POST", headers: auth, body });
+    for (const body of ["notjson", "{}", JSON.stringify({ papers: "bad" }), JSON.stringify({ papers: [], history: 3 })]) {
+      expect((await post(body)).status, body).toBe(400);
+    }
+    expect((await post(JSON.stringify({ history: [] }))).status).toBe(200);
+  });
 });

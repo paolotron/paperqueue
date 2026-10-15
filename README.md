@@ -21,7 +21,7 @@ uv run paperqueue                                              # or run it from 
 ```
 
 The app starts with the link input focused, so letters go into it: paste a link and press `Enter`,
-then `Esc` to move to the list, where the keys below work.
+then `Esc` to move to the list, where `↑`/`↓` move the cursor and the keys below work.
 
 | key | action |
 |---|---|
@@ -33,13 +33,14 @@ then `Esc` to move to the list, where the keys below work.
 | `d` | delete the highlighted paper (it goes to history without a review) |
 | `e` / `c` | rename the highlighted paper / set its conference (also in history) |
 | `a` / `Esc` | focus the input / the list |
-| `h` | history of read and deleted papers: `i` shows the review, `r`/`Enter` re-adds one to the top of the stack (its old review is cleared), `o` opens it, `x` forgets it, `Esc` goes back |
+| `h` | history of read and deleted papers: `i` shows the review, `r`/`Enter` re-adds one to the top of the stack (its old review is cleared), `o` opens it, `x` forgets it for good (no confirmation), `Esc`/`h`/`q` go back |
 | `t` | cycle the palettes (remembered in `~/.config/paperqueue/ui.toml`) |
 | `q` | quit |
 
 After `p` or `b` the PDF opens and a review panel replaces the list: write a comment, set the usefulness
 with `←`/`→`, then `Ctrl+S` (or the button) saves it and moves the paper to history. `Esc` cancels:
-the paper stays where it was on the stack, there is no way to skip the review.
+the paper stays where it was on the stack, there is no way to skip the review. During a review, `Tab` reaches the
+link input so you can still add papers, and `Esc` there returns to the review.
 
 Besides the three De Stijl palettes, `t` reaches `dinn`: strictly two colours, ink on bone, with
 every tone between them dithered through a 4x4 Bayer matrix the way *Return of the Obra Dinn* does
@@ -51,7 +52,8 @@ Scholar Inbox links (resolved to arXiv by title) and OpenReview forum links. Tit
 OpenReview blocks scripted page fetches, so its papers get a working PDF link but keep the URL as their title:
 press `e` to give them one.
 
-Without a server configured, the stack lives in `~/.local/share/paperqueue/stack.json`.
+Without a server configured, the stack lives in `~/.local/share/paperqueue/stack.json`
+(`$XDG_DATA_HOME/paperqueue/` if set; config files likewise follow `$XDG_CONFIG_HOME`).
 
 ## Synced server (Cloudflare Worker)
 
@@ -79,6 +81,7 @@ below the free limits.
    npx wrangler deploy               # prints the https://paperqueue.<subdomain>.workers.dev URL
    ```
 
+   On a new account, `secret put` offers to create the Worker first: accept, `deploy` then fills it in.
    The Worker is called `paperqueue`; change `name` in `web/wrangler.jsonc` to deploy it under another name.
    Logs are enabled (`observability` in `wrangler.jsonc`) and show up under the Worker's *Observability* tab.
 
@@ -133,12 +136,17 @@ cp .dev.vars.example .dev.vars    # sets the local access token to "dev-token"
 npx wrangler dev                  # http://localhost:8787, data kept in web/.wrangler/; keeps running
 ```
 
-Then, in another terminal:
+Then, in another terminal, point the TUI at it:
 
 ```sh
-cd web && npx vitest run          # Durable Object, API and link-resolution tests
 PAPERQUEUE_URL=http://localhost:8787 PAPERQUEUE_TOKEN=dev-token uv run paperqueue
-uv run pytest                     # terminal app tests
+```
+
+The tests need no running server:
+
+```sh
+uv run pytest                     # terminal app, store and link-resolution tests
+cd web && npx vitest run          # Durable Object, API and link-resolution tests
 ```
 
 ### API
@@ -151,10 +159,10 @@ for a bare `1706.03762`); the `?url=` and `{url}` parameters below take that for
 |---|---|
 | `GET /api/state` | `{version, papers, history}` (papers bottom→top, history oldest→newest) |
 | `POST /api/papers` `{url}` | normalize and push (409 if already queued) |
-| `POST /api/pop` / `POST /api/take` `{url?, comment, usefulness}` | complete a reading and move the top / bottom paper into history; `comment` is required and `usefulness` is a 0–5 number (400 otherwise). `url`, if given, must be the paper currently at that end, so a stale client cannot review the wrong paper (404 with `paper: null` when it is not, or when the stack is empty) |
+| `POST /api/pop` / `POST /api/take` `{url?, comment, usefulness}` | complete a reading and move a paper into history; `comment` is required and `usefulness` is a 0–5 number (400 otherwise). Without `url` it takes the top / bottom paper; with `url` it takes that paper wherever it now is, since papers may have been added while it was being read. 404 with `paper: null` when the stack is empty or `url` is no longer on it |
 | `DELETE /api/papers?url=` | delete a paper into history |
 | `POST /api/history/restore` `{url}` / `DELETE /api/history?url=` | re-add / forget |
-| `POST /api/import` `{papers, history}` | merge a local `stack.json`; URLs the server already has are skipped. Returns `{added_papers, added_history, state}` |
+| `POST /api/import` `{papers, history}` | merge a local `stack.json`; URLs the server already has are skipped. Returns `{added_papers, added_history, state}` (400 unless at least one of the two is an array) |
 
 ## License
 

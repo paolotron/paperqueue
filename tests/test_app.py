@@ -72,3 +72,37 @@ def test_ctrl_s_saves_the_review(run):
     assert len(stack) == 2
     [read] = stack.history_newest_first()
     assert (read.url, read.review_comment, read.usefulness) == ("https://example.com/0", "solid", 2.5)
+
+
+def test_failed_save_refreshes_the_list_when_the_paper_is_gone(run):
+    async def scenario(app, pilot):
+        await pilot.press("p")
+        await pilot.pause()
+
+        def pop_after_remote_delete(*_):
+            # Like the server: the paper was deleted elsewhere, and the 404 brings that newer state.
+            app.stack.remove("https://example.com/2")
+            return None
+
+        app.stack.pop = pop_after_remote_delete
+        await pilot.press(*"late", "ctrl+s")
+        await pilot.pause()
+        table = app.query_one(tui.DataTable)
+        assert table.row_count == 2
+        assert str(table.coordinate_to_cell_key((0, 0)).row_key.value) == "https://example.com/1"
+
+    stack, _ = run(scenario)
+    assert [p.url for p in stack.top_first()] == ["https://example.com/1", "https://example.com/0"]
+
+
+def test_escape_in_the_link_input_returns_to_the_review(run):
+    async def scenario(app, pilot):
+        await pilot.press("p")
+        await pilot.pause()
+        app.query_one("#link", tui.Input).focus()
+        await pilot.press("escape")
+        await pilot.pause()
+        assert app._reviewing is not None
+        assert app.focused is app.query_one("#review-comment")
+
+    run(scenario)
