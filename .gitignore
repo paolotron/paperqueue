@@ -2,8 +2,17 @@
 __pycache__/
 *.pyc
 .pytest_cache/
+.DS_Store
 web/node_modules/
 web/.wrangler/
-web/.env
-web/.dev.vars
 web/worker-configuration.d.ts
+
+# Secrets: never commit these (templates end in .example)
+.env
+.env.*
+!.env.example
+.dev.vars
+.dev.vars.*
+!.dev.vars.example
+*.pem
+stack.json

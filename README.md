@@ -4,11 +4,17 @@ A stack of papers to read. Paste a link, push it; pop from the top or take from 
 Each reading finishes with a required comment and a continuous 0–5 usefulness rating, which are stored with the paper in history.
 Works as a terminal app and as a web page (installable on phones), with one queue synced across devices.
 
+There are three ways to run it, pick the one you need:
+
+1. **Terminal only**: the TUI keeps the stack in a local file. No server, no account.
+2. **Your own server, on your machine**: run the sync server locally with `wrangler dev` ([Local development](#local-development)). No Cloudflare account needed.
+3. **Your own server, on Cloudflare**: deploy `web/` to *your* Cloudflare account ([Deploy](#deploy)); the free plan is enough. The repository contains no account ID or credentials, so a deploy always goes to whichever account you log in with.
+
 ## Terminal app
 
 ```sh
-uv run paperqueue          # from this directory
-uv tool install .          # or install the `paperqueue` command globally
+uv tool install git+https://github.com/paolotron/paperqueue   # install the `paperqueue` command
+uv run paperqueue                                              # or run it from a clone
 ```
 
 | key | action |
@@ -41,19 +47,26 @@ exposes a small JSON API and resolves titles/PDFs itself. One secret token prote
 
 ### Deploy
 
-1. In the Cloudflare dashboard of the account you want to use: *My Profile → API Tokens → Create Token →
-   "Edit Cloudflare Workers"* template. Copy `web/.env.example` to `web/.env` and fill in the token and the
-   account ID (shown on the account's Workers overview page). `.env` is git-ignored.
+1. Authenticate wrangler with the Cloudflare account you want to deploy to, either way:
+   - **Simplest**: `cd web && npx wrangler login` (browser sign-in).
+   - **Scoped token** (useful if wrangler is already logged into another account you don't want to touch):
+     in that account's dashboard, *My Profile → API Tokens → Create Token → "Edit Cloudflare Workers"* template.
+     Copy `web/.env.example` to `web/.env` and fill in the token and the account ID (shown on the account's
+     Workers overview page). `.env` is git-ignored. Export it before every wrangler command: `set -a; . ./.env; set +a`.
 2. Generate the access token that clients will use, e.g. `openssl rand -hex 32`, and keep it somewhere safe.
 3. Deploy:
 
    ```sh
    cd web
    npm install
-   set -a; . ./.env; set +a          # export CLOUDFLARE_API_TOKEN / CLOUDFLARE_ACCOUNT_ID for wrangler
    npx wrangler secret put TOKEN     # paste the access token from step 2
    npx wrangler deploy               # prints the https://paperqueue.<subdomain>.workers.dev URL
    ```
+
+   The Worker is called `paperqueue`; change `name` in `web/wrangler.jsonc` to deploy it under another name.
+
+The access token is the only thing protecting your queue: use a long random one, and never commit
+`web/.env` or `web/.dev.vars` (both are git-ignored).
 
 ### Use it
 
@@ -94,7 +107,8 @@ exposes a small JSON API and resolves titles/PDFs itself. One secret token prote
 
 ```sh
 cd web && npm install
-npx wrangler dev                  # http://localhost:8787, token "dev-token" from .dev.vars
+cp .dev.vars.example .dev.vars    # sets the local access token to "dev-token"
+npx wrangler dev                  # http://localhost:8787, data kept in web/.wrangler/
 npx vitest run                    # Durable Object, API and link-resolution tests
 PAPERQUEUE_URL=http://localhost:8787 PAPERQUEUE_TOKEN=dev-token uv run paperqueue
 ```
@@ -111,3 +125,7 @@ All routes need `Authorization: Bearer <token>` and answer JSON. Mutations retur
 | `DELETE /api/papers?url=` | delete a paper into history |
 | `POST /api/history/restore` `{url}` / `DELETE /api/history?url=` | re-add / forget |
 | `POST /api/import` `{papers, history}` | merge a local `stack.json` |
+
+## License
+
+MIT, see [LICENSE](LICENSE).
