@@ -253,6 +253,7 @@
                  background: var(--ground); color: var(--fg); border: var(--rule-w) solid var(--rule); }
   dialog button { width: 100%; font: 700 14px var(--sans); padding: 8px; cursor: pointer;
                   background: var(--blue); color: var(--on-fill); border: var(--rule-w) solid var(--rule); }
+  dialog button.secondary { margin-top: 8px; background: var(--panel); color: var(--fg); }
   dialog .hint { color: var(--muted); font-size: 12px; }
   dialog textarea { width: 100%; min-height: 7em; resize: vertical; font: 14px/1.4 var(--sans); padding: 8px 10px;
                     margin: 7px 0 12px; background: var(--ground); color: var(--fg); border: var(--rule-w) solid var(--rule); }
@@ -378,6 +379,7 @@
     <label for="usefulness">Usefulness <output id="reviewValue">2.5</output></label>
     <input id="usefulness" type="range" min="0" max="5" step="0.1" value="2.5" aria-describedby="reviewValue">
     <button type="submit">Save review and mark as read</button>
+    <button type="button" id="reviewCancel" class="secondary">Cancel, keep it on the stack</button>
   </form>
 </dialog>
 <dialog id="editDialog">
@@ -518,7 +520,7 @@
     },
     history: {
       index: false,
-      columns: [["Title", null], ["Conference", "c-conf"], ["Review", "c-review"], ["Score", "c-score"], ["Read", "c-read"]],
+      columns: [["Title", null], ["Conference", "c-conf"], ["Review", "c-review"], ["Score", "c-score"], ["Date", "c-read"]],
       cells: (p) => [p.title || p.url, p.conference || "—", p.review_comment || "—", p.usefulness == null ? "—" : p.usefulness + " / 5", fmt(p.read_at)],
       primary: (p) => p.title || p.url,
       meta: (p) => (p.usefulness == null ? "unrated" : p.usefulness + " / 5") + " · " + (p.review_comment || "no review"),
@@ -975,8 +977,8 @@
       const { data } = await api("POST", kind === "top" ? "/api/pop" : "/api/take", { url: paper.url, comment, usefulness });
       if (data && data.state) apply(data.state);
       if (!data || !data.paper) { if (win) win.close(); toast("That paper is no longer in this position", true); return; }
-      $("reviewDialog").close();
       reading = null;
+      $("reviewDialog").close();
       toast("Reading from " + kind + ": " + data.paper.title);
     } catch (e) { toast(e.message, true); }
   }
@@ -1105,7 +1107,13 @@
     refresh().then(startPolling);
   });
   $("reviewForm").addEventListener("submit", (e) => { e.preventDefault(); submitReview(); });
-  $("reviewDialog").addEventListener("cancel", (e) => e.preventDefault());
+  // Esc or Cancel abandons the review; the paper was never removed, so it stays where it was.
+  $("reviewCancel").addEventListener("click", () => $("reviewDialog").close());
+  $("reviewDialog").addEventListener("close", () => {
+    if (!reading) return;
+    reading = null;
+    toast("Review cancelled; the paper stays on the stack");
+  });
   $("editForm").addEventListener("submit", (e) => { e.preventDefault(); saveEdit(); });
   $("editDialog").addEventListener("close", () => { editing = null; });
   $("usefulness").addEventListener("input", () => { $("reviewValue").value = $("usefulness").value; });

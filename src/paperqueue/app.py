@@ -187,13 +187,20 @@ class ReviewPanel(Vertical):
     Lives inside the main screen rather than in a modal, so the link input above it stays usable.
     """
 
-    BINDINGS = [Binding("ctrl+enter", "submit", "Save review")]
+    # Many terminals send Ctrl+Enter as a plain Enter, so Ctrl+S is the binding that always works.
+    BINDINGS = [
+        Binding("ctrl+s,ctrl+enter", "submit", "Save review"),
+        Binding("escape", "cancel", "Cancel (keep on stack)"),
+    ]
 
     class Submitted(Message):
         def __init__(self, comment: str, usefulness: float) -> None:
             super().__init__()
             self.comment = comment
             self.usefulness = usefulness
+
+    class Cancelled(Message):
+        pass
 
     def __init__(self, paper: Paper) -> None:
         super().__init__(id="review")
@@ -204,7 +211,8 @@ class ReviewPanel(Vertical):
         yield Static("Comment (required)")
         yield TextArea(placeholder="What did you take from it?", id="review-comment")
         yield UsefulnessSlider(id="review-usefulness")
-        yield Static("Use ←/→ or click the slider. Ctrl+Enter saves the review. Tab reaches the link input.", classes="review-hint")
+        yield Static("Use ←/→ or click the slider. Ctrl+S saves the review; Esc cancels and leaves the paper on the stack. "
+                     "Tab reaches the link input.", classes="review-hint")
         yield Button("Save review and mark as read", id="review-save", variant="primary")
 
     def on_mount(self) -> None:
@@ -217,6 +225,9 @@ class ReviewPanel(Vertical):
             self.query_one(TextArea).focus()
             return
         self.post_message(self.Submitted(comment, self.query_one(UsefulnessSlider).value))
+
+    def action_cancel(self) -> None:
+        self.post_message(self.Cancelled())
 
     def on_button_pressed(self, event: Button.Pressed) -> None:
         if event.button.id == "review-save":
@@ -344,7 +355,7 @@ class HistoryScreen(Screen[None]):
         table.add_column("Conference", key="conference", width=14)
         table.add_column("Review", key="review")
         table.add_column("Score", key="score", width=7)
-        table.add_column("Read", key="read", width=16)
+        table.add_column("Date", key="read", width=16)
         self.refresh_table()
         table.focus()
 
@@ -586,19 +597,31 @@ class PaperQueue(App[None]):
         if self._reviewing is None:
             return
         where, expected_url = self._reviewing
+        self._end_review()
+        self._complete_read(where, expected_url, (message.comment, message.usefulness))
+
+    def on_review_panel_cancelled(self, _: ReviewPanel.Cancelled) -> None:
+        self._end_review()
+        self.notify("Review cancelled; the paper stays on the stack")
+
+    def _end_review(self) -> None:
         self._reviewing = None
         self.query_one(ReviewPanel).remove()
         self.refresh_table()
         self.query_one(DataTable).focus()
-        self._complete_read(where, expected_url, (message.comment, message.usefulness))
+
+    _STACK_ACTIONS = {
+        "pop_top", "take_bottom", "peek", "peek_page", "delete", "conference", "rename", "history", "focus_input",
+    }
 
     def check_action(self, action: str, parameters: tuple[object, ...]) -> bool | None:
-        # The table is hidden while a review is pending; keep its actions from acting on it unseen.
-        if self._reviewing and action in {
-            "pop_top", "take_bottom", "peek", "peek_page", "delete", "conference", "rename", "history",
-        }:
+        # These act on the stack table. Keep them from acting on it unseen: while a review hides it,
+        # or while another screen (history, an editor) covers it.
+        if action not in self._STACK_ACTIONS:
+            return True
+        if self.screen is not self.screen_stack[0]:
             return False
-        return True
+        return not (self._reviewing and action != "focus_input")
 
     def _complete_read(self, where: str, expected_url: str, review: tuple[str, float]) -> None:
         comment, usefulness = review
@@ -639,7 +662,7 @@ class PaperQueue(App[None]):
             self.notify("Nothing selected", severity="warning")
             return
         opener.open_url(paper.read_url if pdf else paper.url)
-        self.notify(f"Opened: {paper.title}")
+        self.notify(f"Opened {'PDF' if pdf and paper.pdf_url else 'page'}: {paper.title}")
 
     def action_delete(self) -> None:
         paper = self._highlighted()
@@ -696,7 +719,11 @@ def open_stack() -> Stack | RemoteStack:
 
 
 def cmd_import() -> int:
-    config = load_server_config()
+    try:
+        config = load_server_config()
+    except ValueError as exc:
+        print(f"paperqueue import: {exc}", file=sys.stderr)
+        return 2
     if config is None:
         print("paperqueue import: no server configured (set PAPERQUEUE_URL/PAPERQUEUE_TOKEN "
               "or ~/.config/paperqueue/config.toml)", file=sys.stderr)
@@ -708,8 +735,12 @@ def cmd_import() -> int:
     except RemoteError as exc:
         print(f"paperqueue import: {exc}", file=sys.stderr)
         return 1
-    print(f"Imported {summary.get('added_papers', 0)} papers and {summary.get('added_history', 0)} "
-          f"history entries from {local.path} to {config.url}; the server now has {len(remote)} papers.")
+    added_papers, added_history = summary.get("added_papers", 0), summary.get("added_history", 0)
+    skipped = len(local) + len(local.history_oldest_first()) - added_papers - added_history
+    print(f"Imported {added_papers} papers and {added_history} history entries from {local.path} to {config.url}; "
+          f"the server now has {len(remote)} papers.")
+    if skipped:
+        print(f"Skipped {skipped} already on the server (in its stack or history); the server's copy was kept.")
     return 0
 
 
